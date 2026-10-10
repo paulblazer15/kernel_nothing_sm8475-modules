@@ -5,11 +5,12 @@
  * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
-#include "ipa_wigig.h"
+#include <linux/ipa_wigig.h>
 #include <linux/debugfs.h>
 #include <linux/string.h>
 #include "ipa_common_i.h"
 #include "ipa_pm.h"
+#include <linux/ipa_fmwk.h>
 
 #define OFFLOAD_DRV_NAME "ipa_wigig"
 #define IPA_WIGIG_DBG(fmt, args...) \
@@ -125,7 +126,7 @@ static int ipa_wigig_init_debugfs(struct dentry *parent) { return 0; }
 static inline void ipa_wigig_deinit_debugfs(void) { }
 #endif
 
-int ipa_wigig_init(struct ipa_wigig_init_in_params *in,
+static int ipa_wigig_init_internal(struct ipa_wigig_init_in_params *in,
 	struct ipa_wigig_init_out_params *out)
 {
 	struct ipa_wdi_uc_ready_params inout;
@@ -183,9 +184,8 @@ int ipa_wigig_init(struct ipa_wigig_init_in_params *in,
 
 	return 0;
 }
-EXPORT_SYMBOL(ipa_wigig_init);
 
-int ipa_wigig_cleanup(void)
+static int ipa_wigig_cleanup_internal(void)
 {
 	struct ipa_wigig_intf_info *entry;
 	struct ipa_wigig_intf_info *next;
@@ -212,9 +212,8 @@ int ipa_wigig_cleanup(void)
 	IPA_WIGIG_DBG("exit\n");
 	return 0;
 }
-EXPORT_SYMBOL(ipa_wigig_cleanup);
 
-bool ipa_wigig_is_smmu_enabled(void)
+static bool ipa_wigig_is_smmu_enabled_internal(void)
 {
 	struct ipa_smmu_in_params in;
 	struct ipa_smmu_out_params out;
@@ -222,13 +221,12 @@ bool ipa_wigig_is_smmu_enabled(void)
 	IPA_WIGIG_DBG("\n");
 
 	in.smmu_client = IPA_SMMU_WIGIG_CLIENT;
-	ipa_get_smmu_params(&in, &out);
+	ipa3_get_smmu_params(&in, &out);
 
 	IPA_WIGIG_DBG("exit (%d)\n", out.smmu_enable);
 
 	return out.smmu_enable;
 }
-EXPORT_SYMBOL(ipa_wigig_is_smmu_enabled);
 
 static int ipa_wigig_init_smmu_params(void)
 {
@@ -239,7 +237,7 @@ static int ipa_wigig_init_smmu_params(void)
 	IPA_WIGIG_DBG("\n");
 
 	in.smmu_client = IPA_SMMU_WIGIG_CLIENT;
-	ret = ipa_get_smmu_params(&in, &out);
+	ret = ipa3_get_smmu_params(&in, &out);
 	if (ret) {
 		IPA_WIGIG_ERR("couldn't get SMMU params %d\n", ret);
 		return ret;
@@ -288,7 +286,7 @@ static int ipa_wigig_commit_partial_hdr(
 		hdr->hdr[i].eth2_ofst = hdr_info[i].dst_mac_addr_offset;
 	}
 
-	if (ipa_add_hdr(hdr)) {
+	if (ipa3_add_hdr(hdr)) {
 		IPA_WIGIG_ERR("fail to add partial headers\n");
 		return -EFAULT;
 	}
@@ -319,7 +317,7 @@ static int ipa_wigig_get_devname(char *netdev_name)
 	return 0;
 }
 
-int ipa_wigig_reg_intf(
+static int ipa_wigig_reg_intf_internal(
 	struct ipa_wigig_reg_intf_in_params *in)
 {
 	struct ipa_wigig_intf_info *new_intf;
@@ -427,7 +425,7 @@ int ipa_wigig_reg_intf(
 	rx_prop[1].src_pipe = IPA_CLIENT_WIGIG_PROD;
 	rx_prop[1].hdr_l2_type = in->hdr_info[1].hdr_type;
 
-	if (ipa_register_intf(in->netdev_name, &tx, &rx)) {
+	if (ipa3_register_intf(in->netdev_name, &tx, &rx)) {
 		IPA_WIGIG_ERR("fail to add interface prop\n");
 		ret = -EFAULT;
 		goto fail_register;
@@ -449,7 +447,7 @@ int ipa_wigig_reg_intf(
 	IPA_WIGIG_DBG("exit\n");
 	return 0;
 fail_sendmsg:
-	ipa_deregister_intf(in->netdev_name);
+	ipa3_deregister_intf(in->netdev_name);
 fail_register:
 	del_hdr = kzalloc(sizeof(struct ipa_ioc_del_hdr) +
 		2 * sizeof(struct ipa_hdr_del), GFP_KERNEL);
@@ -458,7 +456,7 @@ fail_register:
 		del_hdr->num_hdls = 2;
 		del_hdr->hdl[0].hdl = new_intf->partial_hdr_hdl[IPA_IP_v4];
 		del_hdr->hdl[1].hdl = new_intf->partial_hdr_hdl[IPA_IP_v6];
-		ipa_del_hdr(del_hdr);
+		ipa3_del_hdr(del_hdr);
 		kfree(del_hdr);
 	}
 	new_intf->partial_hdr_hdl[IPA_IP_v4] = 0;
@@ -471,9 +469,8 @@ fail:
 	mutex_unlock(&ipa_wigig_ctx->lock);
 	return ret;
 }
-EXPORT_SYMBOL(ipa_wigig_reg_intf);
 
-int ipa_wigig_dereg_intf(const char *netdev_name)
+static int ipa_wigig_dereg_intf_internal(const char *netdev_name)
 {
 	int len, ret;
 	struct ipa_ioc_del_hdr *hdr = NULL;
@@ -514,14 +511,14 @@ int ipa_wigig_dereg_intf(const char *netdev_name)
 			IPA_WIGIG_DBG("IPv4 hdr hdl: %d IPv6 hdr hdl: %d\n",
 				hdr->hdl[0].hdl, hdr->hdl[1].hdl);
 
-			if (ipa_del_hdr(hdr)) {
+			if (ipa3_del_hdr(hdr)) {
 				IPA_WIGIG_ERR(
 					"fail to delete partial header\n");
 				ret = -EFAULT;
 				goto fail;
 			}
 
-			if (ipa_deregister_intf(entry->netdev_name)) {
+			if (ipa3_deregister_intf(entry->netdev_name)) {
 				IPA_WIGIG_ERR("fail to del interface props\n");
 				ret = -EFAULT;
 				goto fail;
@@ -548,7 +545,6 @@ fail:
 	mutex_unlock(&ipa_wigig_ctx->lock);
 	return ret;
 }
-EXPORT_SYMBOL(ipa_wigig_dereg_intf);
 
 static void ipa_wigig_pm_cb(void *p, enum ipa_pm_cb_event event)
 {
@@ -611,7 +607,7 @@ static u8 ipa_wigig_pipe_to_bit_val(int client)
 	return shift_val;
 }
 
-int ipa_wigig_conn_rx_pipe(struct ipa_wigig_conn_rx_in_params *in,
+static int ipa_wigig_conn_rx_pipe_internal(struct ipa_wigig_conn_rx_in_params *in,
 	struct ipa_wigig_conn_out_params *out)
 {
 	int ret;
@@ -701,7 +697,6 @@ fail_msi:
 fail_pm:
 	return ret;
 }
-EXPORT_SYMBOL(ipa_wigig_conn_rx_pipe);
 
 static int ipa_wigig_client_to_idx(enum ipa_client_type client,
 	unsigned int *idx)
@@ -977,7 +972,7 @@ fail_map_desc_h:
 	return ret;
 }
 
-int ipa_wigig_save_regs(void)
+static int ipa_wigig_save_regs_cb(void)
 {
 	void __iomem *desc_ring_h = NULL, *desc_ring_t = NULL,
 		*status_ring_h = NULL, *status_ring_t = NULL,
@@ -1101,7 +1096,6 @@ fail_map_gen_tx:
 fail_map_gen_rx:
 	return ret;
 }
-EXPORT_SYMBOL(ipa_wigig_save_regs);
 
 static void ipa_wigig_clean_rx_buff_smmu_info(void)
 {
@@ -1389,7 +1383,7 @@ static int ipa_wigig_clean_smmu_info(enum ipa_client_type client)
 
 	return 0;
 }
-int ipa_wigig_conn_rx_pipe_smmu(
+static int ipa_wigig_conn_rx_pipe_smmu_internal(
 	struct ipa_wigig_conn_rx_in_params_smmu *in,
 	struct ipa_wigig_conn_out_params *out)
 {
@@ -1486,9 +1480,8 @@ fail_msi:
 fail_pm:
 	return ret;
 }
-EXPORT_SYMBOL(ipa_wigig_conn_rx_pipe_smmu);
 
-int ipa_wigig_set_perf_profile(u32 max_supported_bw_mbps)
+static int ipa_wigig_set_perf_profile_internal(u32 max_supported_bw_mbps)
 {
 	IPA_WIGIG_DBG("setting throughput to %d\n", max_supported_bw_mbps);
 
@@ -1507,7 +1500,6 @@ int ipa_wigig_set_perf_profile(u32 max_supported_bw_mbps)
 
 	return 0;
 }
-EXPORT_SYMBOL(ipa_wigig_set_perf_profile);
 
 static int ipa_wigig_store_client_mac(enum ipa_client_type client,
 	const char *mac)
@@ -1541,7 +1533,7 @@ static int ipa_wigig_clean_client_mac(enum ipa_client_type client)
 	return ipa_wigig_store_client_mac(client, zero_mac);
 }
 
-int ipa_wigig_conn_client(struct ipa_wigig_conn_tx_in_params *in,
+static int ipa_wigig_conn_client_internal(struct ipa_wigig_conn_tx_in_params *in,
 	struct ipa_wigig_conn_out_params *out)
 {
 	char dev_name[IPA_RESOURCE_NAME_MAX];
@@ -1620,9 +1612,8 @@ fail_convert_client_to_idx:
 	ipa3_disconn_wigig_pipe_i(out->client, NULL, NULL);
 	return -EINVAL;
 }
-EXPORT_SYMBOL(ipa_wigig_conn_client);
 
-int ipa_wigig_conn_client_smmu(
+static int ipa_wigig_conn_client_smmu_internal(
 	struct ipa_wigig_conn_tx_in_params_smmu *in,
 	struct ipa_wigig_conn_out_params *out)
 {
@@ -1707,7 +1698,6 @@ fail_sendmsg:
 	ipa3_disconn_wigig_pipe_i(out->client, &in->pipe_smmu, &in->dbuff_smmu);
 	return ret;
 }
-EXPORT_SYMBOL(ipa_wigig_conn_client_smmu);
 
 static inline int ipa_wigig_validate_client_type(enum ipa_client_type client)
 {
@@ -1726,7 +1716,7 @@ static inline int ipa_wigig_validate_client_type(enum ipa_client_type client)
 	return 0;
 }
 
-int ipa_wigig_disconn_pipe(enum ipa_client_type client)
+static int ipa_wigig_disconn_pipe_internal(enum ipa_client_type client)
 {
 	int ret;
 	char dev_name[IPA_RESOURCE_NAME_MAX];
@@ -1828,9 +1818,8 @@ int ipa_wigig_disconn_pipe(enum ipa_client_type client)
 	IPA_WIGIG_DBG("exit\n");
 	return 0;
 }
-EXPORT_SYMBOL(ipa_wigig_disconn_pipe);
 
-int ipa_wigig_enable_pipe(enum ipa_client_type client)
+static int ipa_wigig_enable_pipe_internal(enum ipa_client_type client)
 {
 	int ret;
 
@@ -1863,9 +1852,8 @@ fail_pm_active:
 	ipa3_disable_wigig_pipe_i(client);
 	return ret;
 }
-EXPORT_SYMBOL(ipa_wigig_enable_pipe);
 
-int ipa_wigig_disable_pipe(enum ipa_client_type client)
+static int ipa_wigig_disable_pipe_internal(enum ipa_client_type client)
 {
 	int ret;
 
@@ -1891,9 +1879,8 @@ int ipa_wigig_disable_pipe(enum ipa_client_type client)
 	IPA_WIGIG_DBG("exit\n");
 	return 0;
 }
-EXPORT_SYMBOL(ipa_wigig_disable_pipe);
 
-int ipa_wigig_tx_dp(enum ipa_client_type dst, struct sk_buff *skb)
+static int ipa_wigig_tx_dp_internal(enum ipa_client_type dst, struct sk_buff *skb)
 {
 	int ret;
 
@@ -1910,7 +1897,6 @@ int ipa_wigig_tx_dp(enum ipa_client_type dst, struct sk_buff *skb)
 	IPA_WIGIG_DBG_LOW("exit\n");
 	return 0;
 }
-EXPORT_SYMBOL(ipa_wigig_tx_dp);
 
 
 #ifdef CONFIG_DEBUG_FS
@@ -2064,3 +2050,32 @@ fail_conn_clients:
 	return -EFAULT;
 }
 #endif
+
+void ipa_wigig_register(void)
+{
+	struct ipa_wigig_data funcs;
+
+	funcs.ipa_wigig_init = ipa_wigig_init_internal;
+	funcs.ipa_wigig_cleanup = ipa_wigig_cleanup_internal;
+	funcs.ipa_wigig_is_smmu_enabled = ipa_wigig_is_smmu_enabled_internal;
+	funcs.ipa_wigig_reg_intf = ipa_wigig_reg_intf_internal;
+	funcs.ipa_wigig_dereg_intf = ipa_wigig_dereg_intf_internal;
+	funcs.ipa_wigig_conn_rx_pipe = ipa_wigig_conn_rx_pipe_internal;
+	funcs.ipa_wigig_conn_rx_pipe_smmu =
+		ipa_wigig_conn_rx_pipe_smmu_internal;
+	funcs.ipa_wigig_conn_client = ipa_wigig_conn_client_internal;
+	funcs.ipa_wigig_conn_client_smmu =
+		ipa_wigig_conn_client_smmu_internal;
+	funcs.ipa_wigig_disconn_pipe = ipa_wigig_disconn_pipe_internal;
+	funcs.ipa_wigig_enable_pipe = ipa_wigig_enable_pipe_internal;
+	funcs.ipa_wigig_disable_pipe = ipa_wigig_disable_pipe_internal;
+	funcs.ipa_wigig_tx_dp = ipa_wigig_tx_dp_internal;
+	funcs.ipa_wigig_set_perf_profile =
+		ipa_wigig_set_perf_profile_internal;
+	funcs.ipa_wigig_save_regs = ipa_wigig_save_regs_cb;
+
+
+	if (ipa_fmwk_register_ipa_wigig(&funcs))
+		pr_err("failed to register ipa_wigig APIs\n");
+}
+EXPORT_SYMBOL(ipa_wigig_register);

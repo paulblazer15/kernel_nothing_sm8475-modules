@@ -11,7 +11,7 @@
 #include <linux/msm_ipa.h>
 #include <linux/ioctl.h>
 #ifdef _KERNEL_
-#include "ipa.h"
+#include <linux/ipa.h>
 #endif
 
 #define IPA_TEST_IOC_MAGIC 0xA5

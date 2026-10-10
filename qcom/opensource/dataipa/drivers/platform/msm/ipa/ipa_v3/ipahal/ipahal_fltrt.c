@@ -4,7 +4,7 @@
  * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
-#include "ipa.h"
+#include <linux/ipa.h>
 #include <linux/errno.h>
 #include <linux/ipc_logging.h>
 #include <linux/debugfs.h>

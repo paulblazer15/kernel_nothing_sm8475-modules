@@ -10,7 +10,7 @@
 #include <linux/kernel.h>
 #include <linux/msm_ipa.h>
 #include <linux/mutex.h>
-#include "ipa.h"
+#include <linux/ipa.h>
 #include <linux/msm_gsi.h>
 #include <linux/dmapool.h>
 #include "ipa_i.h"
@@ -116,15 +116,15 @@ struct ipa3_dma_ctx {
 static struct ipa3_dma_ctx *ipa3_dma_ctx;
 
 /**
- * struct ipa_dma_init_refcnt_ctrl -IPADMA driver init control information
+ * struct ipa3_dma_init_refcnt_ctrl -IPADMA driver init control information
  * @ref_cnt: reference count for initialization operations
  * @lock: lock for the reference count
  */
-struct ipa_dma_init_refcnt_ctrl {
+struct ipa3_dma_init_refcnt_ctrl {
 	unsigned int ref_cnt;
 	struct mutex lock;
 };
-static struct ipa_dma_init_refcnt_ctrl *ipa_dma_init_refcnt_ctrl;
+static struct ipa3_dma_init_refcnt_ctrl *ipa3_dma_init_refcnt_ctrl;
 
 /**
  * ipa3_dma_setup() - One time setup for IPA DMA
@@ -139,20 +139,20 @@ int ipa3_dma_setup(void)
 {
 	IPADMA_FUNC_ENTRY();
 
-	if (ipa_dma_init_refcnt_ctrl) {
+	if (ipa3_dma_init_refcnt_ctrl) {
 		IPADMA_ERR("Setup already done\n");
 		return -EFAULT;
 	}
 
-	ipa_dma_init_refcnt_ctrl =
-		kzalloc(sizeof(*(ipa_dma_init_refcnt_ctrl)), GFP_KERNEL);
+	ipa3_dma_init_refcnt_ctrl =
+		kzalloc(sizeof(*(ipa3_dma_init_refcnt_ctrl)), GFP_KERNEL);
 
-	if (!ipa_dma_init_refcnt_ctrl) {
+	if (!ipa3_dma_init_refcnt_ctrl) {
 		IPADMA_ERR("kzalloc error.\n");
 		return -ENOMEM;
 	}
 
-	mutex_init(&ipa_dma_init_refcnt_ctrl->lock);
+	mutex_init(&ipa3_dma_init_refcnt_ctrl->lock);
 
 	IPADMA_FUNC_EXIT();
 	return 0;
@@ -171,17 +171,17 @@ void ipa3_dma_shutdown(void)
 {
 	IPADMA_FUNC_ENTRY();
 
-	if (!ipa_dma_init_refcnt_ctrl)
+	if (!ipa3_dma_init_refcnt_ctrl)
 		return;
 
-	kfree(ipa_dma_init_refcnt_ctrl);
-	ipa_dma_init_refcnt_ctrl = NULL;
+	kfree(ipa3_dma_init_refcnt_ctrl);
+	ipa3_dma_init_refcnt_ctrl = NULL;
 
 	IPADMA_FUNC_EXIT();
 }
 
 /**
- * ipa_dma_init() -Initialize IPADMA.
+ * ipa3_dma_init() -Initialize IPADMA.
  *
  * This function initialize all IPADMA internal data and connect in dma:
  *	MEMCPY_DMA_SYNC_PROD ->MEMCPY_DMA_SYNC_CONS
@@ -195,7 +195,7 @@ void ipa3_dma_shutdown(void)
  *		-ENOMEM: allocating memory error
  *		-EPERM: pipe connection failed
  */
-int ipa_dma_init(void)
+int ipa3_dma_init(void)
 {
 	struct ipa3_dma_ctx *ipa_dma_ctx_t;
 	struct ipa_sys_connect_params sys_in;
@@ -205,21 +205,21 @@ int ipa_dma_init(void)
 
 	IPADMA_FUNC_ENTRY();
 
-	if (!ipa_dma_init_refcnt_ctrl) {
+	if (!ipa3_dma_init_refcnt_ctrl) {
 		IPADMA_ERR("Setup isn't done yet!\n");
 		return -EINVAL;
 	}
 
-	mutex_lock(&ipa_dma_init_refcnt_ctrl->lock);
-	if (ipa_dma_init_refcnt_ctrl->ref_cnt > 0) {
+	mutex_lock(&ipa3_dma_init_refcnt_ctrl->lock);
+	if (ipa3_dma_init_refcnt_ctrl->ref_cnt > 0) {
 		IPADMA_DBG("Already initialized refcnt=%d\n",
-			ipa_dma_init_refcnt_ctrl->ref_cnt);
+			ipa3_dma_init_refcnt_ctrl->ref_cnt);
 		if (!ipa3_dma_ctx) {
 			IPADMA_ERR("Context missing. refcnt=%d\n",
-				ipa_dma_init_refcnt_ctrl->ref_cnt);
+				ipa3_dma_init_refcnt_ctrl->ref_cnt);
 			res = -EFAULT;
 		} else {
-			ipa_dma_init_refcnt_ctrl->ref_cnt++;
+			ipa3_dma_init_refcnt_ctrl->ref_cnt++;
 		}
 		goto init_unlock;
 	}
@@ -230,7 +230,7 @@ int ipa_dma_init(void)
 		goto init_unlock;
 	}
 
-	if (!ipa_is_ready()) {
+	if (!ipa3_is_ready()) {
 		IPADMA_ERR("IPA is not ready yet\n");
 		res = -EINVAL;
 		goto init_unlock;
@@ -316,7 +316,7 @@ int ipa_dma_init(void)
 	sys_in.ipa_ep_cfg.mode.mode = IPA_DMA;
 	sys_in.ipa_ep_cfg.mode.dst = IPA_CLIENT_MEMCPY_DMA_SYNC_CONS;
 	sys_in.skip_ep_cfg = false;
-	if (ipa_setup_sys_pipe(&sys_in,
+	if (ipa3_setup_sys_pipe(&sys_in,
 		&ipa_dma_ctx_t->ipa_dma_sync_prod_hdl)) {
 		IPADMA_ERR(":setup sync prod pipe failed\n");
 		res = -EPERM;
@@ -331,7 +331,7 @@ int ipa_dma_init(void)
 	sys_in.ipa_ep_cfg.mode.mode = IPA_BASIC;
 	sys_in.notify = NULL;
 	sys_in.priv = NULL;
-	if (ipa_setup_sys_pipe(&sys_in,
+	if (ipa3_setup_sys_pipe(&sys_in,
 		&ipa_dma_ctx_t->ipa_dma_sync_cons_hdl)) {
 		IPADMA_ERR(":setup sync cons pipe failed.\n");
 		res = -EPERM;
@@ -348,7 +348,7 @@ int ipa_dma_init(void)
 	sys_in.ipa_ep_cfg.mode.dst = IPA_CLIENT_MEMCPY_DMA_ASYNC_CONS;
 	sys_in.skip_ep_cfg = false;
 	sys_in.notify = NULL;
-	if (ipa_setup_sys_pipe(&sys_in,
+	if (ipa3_setup_sys_pipe(&sys_in,
 		&ipa_dma_ctx_t->ipa_dma_async_prod_hdl)) {
 		IPADMA_ERR(":setup async prod pipe failed.\n");
 		res = -EPERM;
@@ -363,7 +363,7 @@ int ipa_dma_init(void)
 	sys_in.ipa_ep_cfg.mode.mode = IPA_BASIC;
 	sys_in.notify = ipa3_dma_async_memcpy_notify_cb;
 	sys_in.priv = NULL;
-	if (ipa_setup_sys_pipe(&sys_in,
+	if (ipa3_setup_sys_pipe(&sys_in,
 		&ipa_dma_ctx_t->ipa_dma_async_cons_hdl)) {
 		IPADMA_ERR(":setup async cons pipe failed.\n");
 		res = -EPERM;
@@ -371,18 +371,18 @@ int ipa_dma_init(void)
 	}
 	ipa3_dma_debugfs_init();
 	ipa3_dma_ctx = ipa_dma_ctx_t;
-	ipa_dma_init_refcnt_ctrl->ref_cnt = 1;
+	ipa3_dma_init_refcnt_ctrl->ref_cnt = 1;
 	IPADMA_DBG("ASYNC MEMCPY pipes are connected\n");
 
 	IPADMA_FUNC_EXIT();
 	goto init_unlock;
 
 fail_async_cons:
-	ipa_teardown_sys_pipe(ipa_dma_ctx_t->ipa_dma_async_prod_hdl);
+	ipa3_teardown_sys_pipe(ipa_dma_ctx_t->ipa_dma_async_prod_hdl);
 fail_async_prod:
-	ipa_teardown_sys_pipe(ipa_dma_ctx_t->ipa_dma_sync_cons_hdl);
+	ipa3_teardown_sys_pipe(ipa_dma_ctx_t->ipa_dma_sync_cons_hdl);
 fail_sync_cons:
-	ipa_teardown_sys_pipe(ipa_dma_ctx_t->ipa_dma_sync_prod_hdl);
+	ipa3_teardown_sys_pipe(ipa_dma_ctx_t->ipa_dma_sync_prod_hdl);
 fail_sync_prod:
 	dma_free_coherent(ipa3_ctx->pdev, IPA_DMA_DUMMY_BUFF_SZ * 4,
 		ipa_dma_ctx_t->ipa_dma_dummy_src_sync.base,
@@ -393,25 +393,24 @@ fail_mem_ctrl:
 	kfree(ipa_dma_ctx_t);
 	ipa3_dma_ctx = NULL;
 init_unlock:
-	mutex_unlock(&ipa_dma_init_refcnt_ctrl->lock);
+	mutex_unlock(&ipa3_dma_init_refcnt_ctrl->lock);
 	return res;
 
 }
-EXPORT_SYMBOL(ipa_dma_init);
 
 /**
- * ipa_dma_enable() -Vote for IPA clocks.
+ * ipa3_dma_enable() -Vote for IPA clocks.
  *
  * Can be executed several times (re-entrant)
  *
  *Return codes: 0: success
  *		-EINVAL: IPADMA is not initialized
  */
-int ipa_dma_enable(void)
+int ipa3_dma_enable(void)
 {
 	IPADMA_FUNC_ENTRY();
 	if ((ipa3_dma_ctx == NULL) ||
-		(ipa_dma_init_refcnt_ctrl->ref_cnt < 1)) {
+		(ipa3_dma_init_refcnt_ctrl->ref_cnt < 1)) {
 		IPADMA_ERR("IPADMA isn't initialized, can't enable\n");
 		return -EINVAL;
 	}
@@ -430,7 +429,6 @@ int ipa_dma_enable(void)
 	IPADMA_FUNC_EXIT();
 	return 0;
 }
-EXPORT_SYMBOL(ipa_dma_enable);
 
 static bool ipa3_dma_work_pending(void)
 {
@@ -451,7 +449,7 @@ static bool ipa3_dma_work_pending(void)
 }
 
 /**
- * ipa_dma_disable()- Unvote for IPA clocks.
+ * ipa3_dma_disable()- Unvote for IPA clocks.
  *
  * enter to power save mode.
  *
@@ -462,7 +460,7 @@ static bool ipa3_dma_work_pending(void)
  *		-EFAULT: can not disable ipa_dma as there are pending
  *			memcopy works
  */
-int ipa_dma_disable(void)
+int ipa3_dma_disable(void)
 {
 	unsigned long flags;
 	int res = 0;
@@ -470,7 +468,7 @@ int ipa_dma_disable(void)
 
 	IPADMA_FUNC_ENTRY();
 	if ((ipa3_dma_ctx == NULL) ||
-		(ipa_dma_init_refcnt_ctrl->ref_cnt < 1)) {
+		(ipa3_dma_init_refcnt_ctrl->ref_cnt < 1)) {
 		IPADMA_ERR("IPADMA isn't initialized, can't disable\n");
 		return -EINVAL;
 	}
@@ -505,10 +503,9 @@ completed:
 	mutex_unlock(&ipa3_dma_ctx->enable_lock);
 	return res;
 }
-EXPORT_SYMBOL(ipa_dma_disable);
 
 /**
- * ipa_dma_sync_memcpy()- Perform synchronous memcpy using IPA.
+ * ipa3_dma_sync_memcpy()- Perform synchronous memcpy using IPA.
  *
  * @dest: physical address to store the copied data.
  * @src: physical address of the source data to copy.
@@ -521,7 +518,7 @@ EXPORT_SYMBOL(ipa_dma_disable);
  *		-gsi_status : on GSI failures
  *		-EFAULT: other
  */
-int ipa_dma_sync_memcpy(u64 dest, u64 src, int len)
+int ipa3_dma_sync_memcpy(u64 dest, u64 src, int len)
 {
 	int ep_idx;
 	int res;
@@ -561,7 +558,7 @@ int ipa_dma_sync_memcpy(u64 dest, u64 src, int len)
 	atomic_inc(&ipa3_dma_ctx->sync_memcpy_pending_cnt);
 	spin_unlock_irqrestore(&ipa3_dma_ctx->pending_lock, flags);
 
-	ep_idx = ipa_get_ep_mapping(IPA_CLIENT_MEMCPY_DMA_SYNC_CONS);
+	ep_idx = ipa3_get_ep_mapping(IPA_CLIENT_MEMCPY_DMA_SYNC_CONS);
 	if (-1 == ep_idx) {
 		IPADMA_ERR("Client %u is not mapped\n",
 			IPA_CLIENT_MEMCPY_DMA_SYNC_CONS);
@@ -569,7 +566,7 @@ int ipa_dma_sync_memcpy(u64 dest, u64 src, int len)
 	}
 	cons_sys = ipa3_ctx->ep[ep_idx].sys;
 
-	ep_idx = ipa_get_ep_mapping(IPA_CLIENT_MEMCPY_DMA_SYNC_PROD);
+	ep_idx = ipa3_get_ep_mapping(IPA_CLIENT_MEMCPY_DMA_SYNC_PROD);
 	if (-1 == ep_idx) {
 		IPADMA_ERR("Client %u is not mapped\n",
 			IPA_CLIENT_MEMCPY_DMA_SYNC_PROD);
@@ -752,10 +749,9 @@ fail_mem_alloc:
 		complete(&ipa3_dma_ctx->done);
 	return res;
 }
-EXPORT_SYMBOL(ipa_dma_sync_memcpy);
 
 /**
- * ipa_dma_async_memcpy()- Perform asynchronous memcpy using IPA.
+ * ipa3_dma_async_memcpy()- Perform asynchronous memcpy using IPA.
  *
  * @dest: physical address to store the copied data.
  * @src: physical address of the source data to copy.
@@ -770,7 +766,7 @@ EXPORT_SYMBOL(ipa_dma_sync_memcpy);
  *		-gsi_status : on GSI failures
  *		-EFAULT: descr fifo is full.
  */
-int ipa_dma_async_memcpy(u64 dest, u64 src, int len,
+int ipa3_dma_async_memcpy(u64 dest, u64 src, int len,
 		void (*user_cb)(void *user1), void *user_param)
 {
 	int ep_idx;
@@ -809,7 +805,7 @@ int ipa_dma_async_memcpy(u64 dest, u64 src, int len,
 	atomic_inc(&ipa3_dma_ctx->async_memcpy_pending_cnt);
 	spin_unlock_irqrestore(&ipa3_dma_ctx->pending_lock, flags);
 
-	ep_idx = ipa_get_ep_mapping(IPA_CLIENT_MEMCPY_DMA_ASYNC_CONS);
+	ep_idx = ipa3_get_ep_mapping(IPA_CLIENT_MEMCPY_DMA_ASYNC_CONS);
 	if (-1 == ep_idx) {
 		IPADMA_ERR("Client %u is not mapped\n",
 			IPA_CLIENT_MEMCPY_DMA_ASYNC_CONS);
@@ -817,7 +813,7 @@ int ipa_dma_async_memcpy(u64 dest, u64 src, int len,
 	}
 	cons_sys = ipa3_ctx->ep[ep_idx].sys;
 
-	ep_idx = ipa_get_ep_mapping(IPA_CLIENT_MEMCPY_DMA_ASYNC_PROD);
+	ep_idx = ipa3_get_ep_mapping(IPA_CLIENT_MEMCPY_DMA_ASYNC_PROD);
 	if (-1 == ep_idx) {
 		IPADMA_ERR("Client %u is not mapped\n",
 			IPA_CLIENT_MEMCPY_DMA_ASYNC_PROD);
@@ -949,7 +945,6 @@ fail_mem_alloc:
 		complete(&ipa3_dma_ctx->done);
 	return res;
 }
-EXPORT_SYMBOL(ipa_dma_async_memcpy);
 
 /**
  * ipa3_dma_uc_memcpy() - Perform a memcpy action using IPA uC
@@ -1008,30 +1003,30 @@ dec_and_exit:
 }
 
 /**
- * ipa_dma_destroy() -teardown IPADMA pipes and release ipadma.
+ * ipa3_dma_destroy() -teardown IPADMA pipes and release ipadma.
  *
  * this is a blocking function, returns just after destroying IPADMA.
  */
-void ipa_dma_destroy(void)
+void ipa3_dma_destroy(void)
 {
 	int res = 0;
 
 	IPADMA_FUNC_ENTRY();
 
-	if (!ipa_dma_init_refcnt_ctrl) {
+	if (!ipa3_dma_init_refcnt_ctrl) {
 		IPADMA_ERR("Setup isn't done\n");
 		return;
 	}
 
-	mutex_lock(&ipa_dma_init_refcnt_ctrl->lock);
-	if (ipa_dma_init_refcnt_ctrl->ref_cnt > 1) {
+	mutex_lock(&ipa3_dma_init_refcnt_ctrl->lock);
+	if (ipa3_dma_init_refcnt_ctrl->ref_cnt > 1) {
 		IPADMA_DBG("Multiple initialization done. refcnt=%d\n",
-			ipa_dma_init_refcnt_ctrl->ref_cnt);
-		ipa_dma_init_refcnt_ctrl->ref_cnt--;
+			ipa3_dma_init_refcnt_ctrl->ref_cnt);
+		ipa3_dma_init_refcnt_ctrl->ref_cnt--;
 		goto completed;
 	}
 
-	if ((!ipa3_dma_ctx) || (ipa_dma_init_refcnt_ctrl->ref_cnt == 0)) {
+	if ((!ipa3_dma_ctx) || (ipa3_dma_init_refcnt_ctrl->ref_cnt == 0)) {
 		IPADMA_ERR("IPADMA isn't initialized ctx=%pK\n", ipa3_dma_ctx);
 		goto completed;
 	}
@@ -1047,19 +1042,19 @@ void ipa_dma_destroy(void)
 		goto completed;
 	}
 
-	res = ipa_teardown_sys_pipe(ipa3_dma_ctx->ipa_dma_async_cons_hdl);
+	res = ipa3_teardown_sys_pipe(ipa3_dma_ctx->ipa_dma_async_cons_hdl);
 	if (res)
 		IPADMA_ERR("teardown IPADMA ASYNC CONS failed\n");
 	ipa3_dma_ctx->ipa_dma_async_cons_hdl = 0;
-	res = ipa_teardown_sys_pipe(ipa3_dma_ctx->ipa_dma_sync_cons_hdl);
+	res = ipa3_teardown_sys_pipe(ipa3_dma_ctx->ipa_dma_sync_cons_hdl);
 	if (res)
 		IPADMA_ERR("teardown IPADMA SYNC CONS failed\n");
 	ipa3_dma_ctx->ipa_dma_sync_cons_hdl = 0;
-	res = ipa_teardown_sys_pipe(ipa3_dma_ctx->ipa_dma_async_prod_hdl);
+	res = ipa3_teardown_sys_pipe(ipa3_dma_ctx->ipa_dma_async_prod_hdl);
 	if (res)
 		IPADMA_ERR("teardown IPADMA ASYNC PROD failed\n");
 	ipa3_dma_ctx->ipa_dma_async_prod_hdl = 0;
-	res = ipa_teardown_sys_pipe(ipa3_dma_ctx->ipa_dma_sync_prod_hdl);
+	res = ipa3_teardown_sys_pipe(ipa3_dma_ctx->ipa_dma_sync_prod_hdl);
 	if (res)
 		IPADMA_ERR("teardown IPADMA SYNC PROD failed\n");
 	ipa3_dma_ctx->ipa_dma_sync_prod_hdl = 0;
@@ -1072,13 +1067,12 @@ void ipa_dma_destroy(void)
 	kfree(ipa3_dma_ctx);
 	ipa3_dma_ctx = NULL;
 
-	ipa_dma_init_refcnt_ctrl->ref_cnt = 0;
+	ipa3_dma_init_refcnt_ctrl->ref_cnt = 0;
 	IPADMA_FUNC_EXIT();
 
 completed:
-	mutex_unlock(&ipa_dma_init_refcnt_ctrl->lock);
+	mutex_unlock(&ipa3_dma_init_refcnt_ctrl->lock);
 }
-EXPORT_SYMBOL(ipa_dma_destroy);
 
 /**
  * ipa3_dma_async_memcpy_notify_cb() - Callback function which will be called
@@ -1099,7 +1093,7 @@ void ipa3_dma_async_memcpy_notify_cb(void *priv
 
 	IPADMA_FUNC_ENTRY();
 
-	ep_idx = ipa_get_ep_mapping(IPA_CLIENT_MEMCPY_DMA_ASYNC_CONS);
+	ep_idx = ipa3_get_ep_mapping(IPA_CLIENT_MEMCPY_DMA_ASYNC_CONS);
 	if (ep_idx < 0) {
 		IPADMA_ERR("IPA Client mapping failed\n");
 		return;
@@ -1134,7 +1128,7 @@ static ssize_t ipa3_dma_debugfs_read(struct file *file, char __user *ubuf,
 {
 	int nbytes = 0;
 
-	if (!ipa_dma_init_refcnt_ctrl) {
+	if (!ipa3_dma_init_refcnt_ctrl) {
 		nbytes += scnprintf(&dbg_buff[nbytes],
 			IPADMA_MAX_MSG_LEN - nbytes,
 			"Setup was not done\n");
@@ -1146,12 +1140,12 @@ static ssize_t ipa3_dma_debugfs_read(struct file *file, char __user *ubuf,
 		nbytes += scnprintf(&dbg_buff[nbytes],
 			IPADMA_MAX_MSG_LEN - nbytes,
 			"Status:\n	Not initialized (ref_cnt=%d)\n",
-			ipa_dma_init_refcnt_ctrl->ref_cnt);
+			ipa3_dma_init_refcnt_ctrl->ref_cnt);
 	} else {
 		nbytes += scnprintf(&dbg_buff[nbytes],
 			IPADMA_MAX_MSG_LEN - nbytes,
 			"Status:\n	Initialized (ref_cnt=%d)\n",
-			ipa_dma_init_refcnt_ctrl->ref_cnt);
+			ipa3_dma_init_refcnt_ctrl->ref_cnt);
 		nbytes += scnprintf(&dbg_buff[nbytes],
 			IPADMA_MAX_MSG_LEN - nbytes,
 			"	%s (ref_cnt=%d)\n",

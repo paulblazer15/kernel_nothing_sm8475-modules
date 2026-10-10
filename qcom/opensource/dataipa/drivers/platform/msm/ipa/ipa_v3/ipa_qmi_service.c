@@ -12,7 +12,7 @@
 #include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/uaccess.h>
-#include "ipa.h"
+#include <linux/ipa.h>
 #include <linux/vmalloc.h>
 
 #include "ipa_qmi_service.h"
@@ -148,6 +148,11 @@ static void ipa3_handle_indication_req(struct qmi_handle *qmi_handle,
 	} else {
 		IPAWANERR("not send indication\n");
 	}
+
+#ifdef IPA_CLIENT_MHI_COAL_CONS
+	if (ipa3_ctx->is_mhi_coal_set)
+		ipa_send_mhi_coal_endp_ind_to_modem(false);
+#endif
 }
 
 static void ipa3_handle_install_filter_rule_req(struct qmi_handle *qmi_handle,

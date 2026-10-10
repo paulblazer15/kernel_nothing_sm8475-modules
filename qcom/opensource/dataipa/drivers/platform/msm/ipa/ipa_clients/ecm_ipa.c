@@ -1067,7 +1067,7 @@ static int ecm_ipa_rules_cfg(struct ecm_ipa_dev *ecm_ipa_ctx,
 
 	hdrs->commit = 1;
 	hdrs->num_hdrs = 2;
-	result = ipa_add_hdr(hdrs);
+	result = ipa3_add_hdr(hdrs);
 	if (result) {
 		ECM_IPA_ERROR("Fail on Header-Insertion(%d)\n", result);
 		goto out_free_mem;
@@ -1120,9 +1120,9 @@ static void ecm_ipa_rules_destroy(struct ecm_ipa_dev *ecm_ipa_ctx)
 	ipv6 = &del_hdr->hdl[1];
 	ipv6->hdl = ecm_ipa_ctx->eth_ipv6_hdr_hdl;
 
-	result = ipa_del_hdr(del_hdr);
+	result = ipa3_del_hdr(del_hdr);
 	if (result || ipv4->status || ipv6->status)
-		ECM_IPA_ERROR("ipa_del_hdr failed\n");
+		ECM_IPA_ERROR("ipa3_del_hdr failed\n");
 	kfree(del_hdr);
 }
 
@@ -1183,7 +1183,7 @@ static int ecm_ipa_register_properties(struct ecm_ipa_dev *ecm_ipa_ctx)
 	rx_ipv6_property->hdr_l2_type = hdr_l2_type;
 	rx_properties.num_props = 2;
 
-	result = ipa_register_intf("ecm0", &tx_properties, &rx_properties);
+	result = ipa3_register_intf("ecm0", &tx_properties, &rx_properties);
 	if (result)
 		ECM_IPA_ERROR("fail on Tx/Rx properties registration\n");
 
@@ -1197,7 +1197,7 @@ static void ecm_ipa_deregister_properties(void)
 	int result;
 
 	ECM_IPA_LOG_ENTRY();
-	result = ipa_deregister_intf("ecm0");
+	result = ipa3_deregister_intf("ecm0");
 	if (result)
 		ECM_IPA_DEBUG("Fail on Tx prop deregister\n");
 	ECM_IPA_LOG_EXIT();

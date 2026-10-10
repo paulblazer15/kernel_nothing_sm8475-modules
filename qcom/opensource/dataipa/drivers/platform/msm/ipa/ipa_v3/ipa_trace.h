@@ -255,7 +255,7 @@ TRACE_EVENT(
 );
 
 TRACE_EVENT(
-	ipa_tx_dp,
+	ipa3_tx_dp,
 
 	TP_PROTO(const struct sk_buff *skb, const char *devname, unsigned long client),
 
@@ -271,7 +271,7 @@ TRACE_EVENT(
 	),
 
 	TP_fast_assign(
-		__assign_str(name, skb->dev->name);
+		__assign_str(name, devname);
 		__entry->skbaddr = skb;
 		__entry->protocol = ntohs(skb->protocol);
 		__entry->len = skb->len;

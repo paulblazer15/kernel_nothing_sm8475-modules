@@ -5,7 +5,7 @@
  * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
-#include "ipa_wdi3.h"
+#include <linux/ipa_wdi3.h>
 #include <linux/msm_ipa.h>
 #include <linux/string.h>
 #include "ipa_common_i.h"
@@ -152,28 +152,25 @@ static int assign_hdl_for_inst(int inst_id)
 	return hdl;
 }
 
-int ipa_get_wdi_version(void)
+static int ipa_get_wdi_version_internal(void)
 {
 	if (ipa_wdi_ctx_list[0])
 		return ipa_wdi_ctx_list[0]->wdi_version;
 	/* default version is IPA_WDI_3 */
 	return IPA_WDI_3;
 }
-EXPORT_SYMBOL(ipa_get_wdi_version);
 
-bool ipa_wdi_is_tx1_used(void)
+static bool ipa_wdi_is_tx1_used_internal(void)
 {
 	if (ipa_wdi_ctx_list[0])
 		return ipa_wdi_ctx_list[0]->is_tx1_used;
 	return 0;
 }
-EXPORT_SYMBOL(ipa_wdi_is_tx1_used);
 
-bool ipa_wdi_opt_dpath_ctrl_enabled(ipa_wdi_hdl_t hdl)
+static bool ipa_wdi_opt_dpath_ctrl_enabled_internal(ipa_wdi_hdl_t hdl)
 {
 	return atomic_read(&opt_dpath_info[hdl].is_ctrl_cb_registered);
 }
-EXPORT_SYMBOL(ipa_wdi_opt_dpath_ctrl_enabled);
 
 static void ipa_wdi_pm_cb(void *p, enum ipa_pm_cb_event event)
 {
@@ -226,7 +223,7 @@ static int ipa_wdi_commit_partial_hdr(
 		hdr->hdr[i].eth2_ofst = hdr_info[i].dst_mac_addr_offset;
 	}
 
-	if (ipa_add_hdr(hdr)) {
+	if (ipa3_add_hdr(hdr)) {
 		IPA_WDI_ERR("fail to add partial headers\n");
 		return -EFAULT;
 	}
@@ -242,7 +239,7 @@ static int ipa_wdi_commit_partial_hdr(
  *
  * @Return 0 on success, negative on failure
  */
-int ipa_wdi_get_capabilities(
+static int ipa_wdi_get_capabilities_internal(
 	struct ipa_wdi_capabilities_out_params *out)
 {
 	if (out == NULL) {
@@ -254,7 +251,6 @@ int ipa_wdi_get_capabilities(
 	IPA_WDI_DBG("Wdi Capability: %d\n", out->num_of_instances);
 	return 0;
 }
-EXPORT_SYMBOL(ipa_wdi_get_capabilities);
 
 /**
  * function to init WDI IPA offload data path
@@ -264,7 +260,7 @@ EXPORT_SYMBOL(ipa_wdi_get_capabilities);
  *
  * @Return 0 on success, negative on failure
  */
-int ipa_wdi_init_per_inst(struct ipa_wdi_init_in_params *in,
+static int ipa_wdi_init_per_inst_internal(struct ipa_wdi_init_in_params *in,
 	struct ipa_wdi_init_out_params *out)
 {
 	struct ipa_wdi_uc_ready_params uc_ready_params;
@@ -320,7 +316,7 @@ int ipa_wdi_init_per_inst(struct ipa_wdi_init_in_params *in,
 	else
 		smmu_in.smmu_client = IPA_SMMU_WLAN1_CLIENT;
 
-	if (ipa_get_smmu_params(&smmu_in, &smmu_out))
+	if (ipa3_get_smmu_params(&smmu_in, &smmu_out))
 		out->is_smmu_enabled = false;
 	else
 		out->is_smmu_enabled = smmu_out.smmu_enable;
@@ -346,7 +342,6 @@ int ipa_wdi_init_per_inst(struct ipa_wdi_init_in_params *in,
 
 	return 0;
 }
-EXPORT_SYMBOL(ipa_wdi_init_per_inst);
 
 /**
  * function to register interface
@@ -355,7 +350,7 @@ EXPORT_SYMBOL(ipa_wdi_init_per_inst);
  *
  * @Return 0 on success, negative on failure
  */
-int ipa_wdi_reg_intf_per_inst(
+static int ipa_wdi_reg_intf_per_inst_internal(
 	struct ipa_wdi_reg_intf_in_params *in)
 {
 	struct ipa_ioc_add_hdr *hdr;
@@ -515,7 +510,7 @@ int ipa_wdi_reg_intf_per_inst(
 		rx_prop[1].attrib.meta_data = in->meta_data;
 		rx_prop[1].attrib.meta_data_mask = in->meta_data_mask;
 	}
-	if (ipa_register_intf(in->netdev_name, &tx, &rx)) {
+	if (ipa3_register_intf(in->netdev_name, &tx, &rx)) {
 		IPA_WDI_ERR("fail to add interface prop\n");
 		ret = -EFAULT;
 	}
@@ -534,7 +529,6 @@ fail_alloc_hdr:
 	mutex_unlock(&ipa_wdi_ctx_list[in->hdl]->lock);
 	return ret;
 }
-EXPORT_SYMBOL(ipa_wdi_reg_intf_per_inst);
 
 /**
  * function to connect pipes
@@ -546,7 +540,7 @@ EXPORT_SYMBOL(ipa_wdi_reg_intf_per_inst);
  *
  * @Return 0 on success, negative on failure
  */
-int ipa_wdi_conn_pipes_per_inst(struct ipa_wdi_conn_in_params *in,
+static int ipa_wdi_conn_pipes_per_inst_internal(struct ipa_wdi_conn_in_params *in,
 	struct ipa_wdi_conn_out_params *out)
 {
 	int i, j, ret = 0;
@@ -681,7 +675,7 @@ int ipa_wdi_conn_pipes_per_inst(struct ipa_wdi_conn_in_params *in,
 				in->u_rx.rx.is_txr_rn_db_pcie_addr;
 			in_rx.u.ul.is_evt_rn_db_pcie_addr =
 				in->u_rx.rx.is_evt_rn_db_pcie_addr;
-			if (ipa_connect_wdi_pipe(&in_rx, &out_rx)) {
+			if (ipa3_connect_wdi_pipe(&in_rx, &out_rx)) {
 				IPA_WDI_ERR("fail to setup rx pipe\n");
 				ret = -EFAULT;
 				goto fail_connect_pipe;
@@ -710,7 +704,7 @@ int ipa_wdi_conn_pipes_per_inst(struct ipa_wdi_conn_in_params *in,
 				in->u_tx.tx.is_txr_rn_db_pcie_addr;
 			in_tx.u.dl.is_evt_rn_db_pcie_addr =
 				in->u_tx.tx.is_evt_rn_db_pcie_addr;
-			if (ipa_connect_wdi_pipe(&in_tx, &out_tx)) {
+			if (ipa3_connect_wdi_pipe(&in_tx, &out_tx)) {
 				IPA_WDI_ERR("fail to setup tx pipe\n");
 				ret = -EFAULT;
 				goto fail;
@@ -741,7 +735,7 @@ int ipa_wdi_conn_pipes_per_inst(struct ipa_wdi_conn_in_params *in,
 				in->u_rx.rx_smmu.is_txr_rn_db_pcie_addr;
 			in_rx.u.ul_smmu.is_evt_rn_db_pcie_addr =
 				in->u_rx.rx_smmu.is_evt_rn_db_pcie_addr;
-			if (ipa_connect_wdi_pipe(&in_rx, &out_rx)) {
+			if (ipa3_connect_wdi_pipe(&in_rx, &out_rx)) {
 				IPA_WDI_ERR("fail to setup rx pipe\n");
 				ret = -EFAULT;
 				goto fail_connect_pipe;
@@ -770,7 +764,7 @@ int ipa_wdi_conn_pipes_per_inst(struct ipa_wdi_conn_in_params *in,
 				in->u_tx.tx_smmu.is_txr_rn_db_pcie_addr;
 			in_tx.u.dl_smmu.is_evt_rn_db_pcie_addr =
 				in->u_tx.tx_smmu.is_evt_rn_db_pcie_addr;
-			if (ipa_connect_wdi_pipe(&in_tx, &out_tx)) {
+			if (ipa3_connect_wdi_pipe(&in_tx, &out_tx)) {
 				IPA_WDI_ERR("fail to setup tx pipe\n");
 				ret = -EFAULT;
 				goto fail;
@@ -811,7 +805,7 @@ int ipa_wdi_conn_pipes_per_inst(struct ipa_wdi_conn_in_params *in,
 	return 0;
 
 fail:
-	ipa_disconnect_wdi_pipe(ipa_wdi_ctx_list[in->hdl]->rx_pipe_hdl);
+	ipa3_disconnect_wdi_pipe(ipa_wdi_ctx_list[in->hdl]->rx_pipe_hdl);
 fail_connect_pipe:
 	ipa_pm_deregister(ipa_wdi_ctx_list[in->hdl]->ipa_pm_hdl);
 	if (atomic_read(&opt_dpath_info[in->hdl].is_ctrl_cb_registered))
@@ -824,7 +818,6 @@ fail_setup_sys_pipe:
 		ipa_teardown_sys_pipe(ipa_wdi_ctx_list[in->hdl]->sys_pipe_hdl[j]);
 	return ret;
 }
-EXPORT_SYMBOL(ipa_wdi_conn_pipes_per_inst);
 
 /**
  * function to enable IPA offload data path
@@ -834,7 +827,7 @@ EXPORT_SYMBOL(ipa_wdi_conn_pipes_per_inst);
  *
  * Returns: 0 on success, negative on failure
  */
-int ipa_wdi_enable_pipes_per_inst(ipa_wdi_hdl_t hdl)
+static int ipa_wdi_enable_pipes_per_inst_internal(ipa_wdi_hdl_t hdl)
 {
 	int ret;
 	int ipa_ep_idx_tx, ipa_ep_idx_rx;
@@ -896,19 +889,19 @@ int ipa_wdi_enable_pipes_per_inst(ipa_wdi_hdl_t hdl)
 			IPA_WDI_ERR("pipe handle not valid\n");
 			return -EFAULT;
 		}
-		if (ipa_enable_wdi_pipe(ipa_wdi_ctx_list[hdl]->tx_pipe_hdl)) {
+		if (ipa3_enable_wdi_pipe(ipa_wdi_ctx_list[hdl]->tx_pipe_hdl)) {
 			IPA_WDI_ERR("fail to enable wdi tx pipe\n");
 			return -EFAULT;
 		}
-		if (ipa_resume_wdi_pipe(ipa_wdi_ctx_list[hdl]->tx_pipe_hdl)) {
+		if (ipa3_resume_wdi_pipe(ipa_wdi_ctx_list[hdl]->tx_pipe_hdl)) {
 			IPA_WDI_ERR("fail to resume wdi tx pipe\n");
 			return -EFAULT;
 		}
-		if (ipa_enable_wdi_pipe(ipa_wdi_ctx_list[hdl]->rx_pipe_hdl)) {
+		if (ipa3_enable_wdi_pipe(ipa_wdi_ctx_list[hdl]->rx_pipe_hdl)) {
 			IPA_WDI_ERR("fail to enable wdi rx pipe\n");
 			return -EFAULT;
 		}
-		if (ipa_resume_wdi_pipe(ipa_wdi_ctx_list[hdl]->rx_pipe_hdl)) {
+		if (ipa3_resume_wdi_pipe(ipa_wdi_ctx_list[hdl]->rx_pipe_hdl)) {
 			IPA_WDI_ERR("fail to resume wdi rx pipe\n");
 			return -EFAULT;
 		}
@@ -925,7 +918,6 @@ int ipa_wdi_enable_pipes_per_inst(ipa_wdi_hdl_t hdl)
 
 	return 0;
 }
-EXPORT_SYMBOL(ipa_wdi_enable_pipes_per_inst);
 
 /**
  * set IPA clock bandwidth based on data rates
@@ -935,7 +927,7 @@ EXPORT_SYMBOL(ipa_wdi_enable_pipes_per_inst);
  *
  * Returns: 0 on success, negative on failure
  */
-int ipa_wdi_set_perf_profile_per_inst(ipa_wdi_hdl_t hdl,
+static int ipa_wdi_set_perf_profile_per_inst_internal(ipa_wdi_hdl_t hdl,
 	struct ipa_wdi_perf_profile *profile)
 {
 	int res = 0;
@@ -976,7 +968,6 @@ int ipa_wdi_set_perf_profile_per_inst(ipa_wdi_hdl_t hdl,
 
 	return res;
 }
-EXPORT_SYMBOL(ipa_wdi_set_perf_profile_per_inst);
 
 /**
  * function to create smmu mapping
@@ -985,7 +976,7 @@ EXPORT_SYMBOL(ipa_wdi_set_perf_profile_per_inst);
  * @num_buffers: number of buffers
  * @info: wdi buffer info
  */
-int ipa_wdi_create_smmu_mapping_per_inst(ipa_wdi_hdl_t hdl,
+static int ipa_wdi_create_smmu_mapping_per_inst_internal(ipa_wdi_hdl_t hdl,
 	u32 num_buffers,
 	struct ipa_wdi_buffer_info *info)
 {
@@ -1040,7 +1031,6 @@ int ipa_wdi_create_smmu_mapping_per_inst(ipa_wdi_hdl_t hdl,
 
 	return ret;
 }
-EXPORT_SYMBOL(ipa_wdi_create_smmu_mapping_per_inst);
 
 
 /**
@@ -1051,7 +1041,7 @@ EXPORT_SYMBOL(ipa_wdi_create_smmu_mapping_per_inst);
  *
  * @info: wdi buffer info
  */
-int ipa_wdi_release_smmu_mapping_per_inst(ipa_wdi_hdl_t hdl,
+static int ipa_wdi_release_smmu_mapping_per_inst_internal(ipa_wdi_hdl_t hdl,
 	u32 num_buffers,
 	struct ipa_wdi_buffer_info *info)
 {
@@ -1095,7 +1085,6 @@ int ipa_wdi_release_smmu_mapping_per_inst(ipa_wdi_hdl_t hdl,
 
 	return ret;
 }
-EXPORT_SYMBOL(ipa_wdi_release_smmu_mapping_per_inst);
 
 
 /**
@@ -1159,6 +1148,7 @@ int ipa_wdi_opt_dpath_register_flt_cb_per_inst_v2(
 	ipa_wdi_opt_dpath_clk_status_cb clk_cb)
 {
 	int ret = 0;
+	int i;
 
 	if (hdl < 0 || hdl >= IPA_WDI_INST_MAX) {
 		IPA_WDI_ERR("Invalid Handle %d\n", hdl);
@@ -1177,7 +1167,7 @@ int ipa_wdi_opt_dpath_register_flt_cb_per_inst_v2(
 	opt_dpath_info[hdl].ctrl_flt_add_cb = ctrl_flt_add_cb;
 	opt_dpath_info[hdl].ctrl_flt_rem_cb = ctrl_flt_rem_cb;
 	opt_dpath_info[hdl].clk_cb = clk_cb;
-	for(int i = 0; i<IPA_WDI_MAX_TX_FILTER; i++) {
+	for (i = 0; i < IPA_WDI_MAX_TX_FILTER; i++) {
 		opt_dpath_info[hdl].ctrl_flt[i].hdl = 0;
 		opt_dpath_info[hdl].ctrl_flt[i].index = 0;
 	}
@@ -1286,7 +1276,7 @@ EXPORT_SYMBOL(ipa_wdi_opt_dpath_notify_flt_rlsd_per_inst);
  *
  *
  */
-int ipa_wdi_opt_dpath_rsrv_filter_req(
+static int ipa_wdi_opt_dpath_rsrv_filter_req_internal(
 		struct ipa_wlan_opt_dp_rsrv_filter_req_msg_v01 *req,
 		struct ipa_wlan_opt_dp_rsrv_filter_resp_msg_v01 *resp)
 {
@@ -1368,7 +1358,6 @@ int ipa_wdi_opt_dpath_rsrv_filter_req(
 	return ret;
 
 }
-EXPORT_SYMBOL(ipa_wdi_opt_dpath_rsrv_filter_req);
 
 
 /**
@@ -1381,7 +1370,7 @@ EXPORT_SYMBOL(ipa_wdi_opt_dpath_rsrv_filter_req);
  *
  */
 
-int ipa_wdi_opt_dpath_add_filter_req(
+static int ipa_wdi_opt_dpath_add_filter_req_internal(
 		struct ipa_wlan_opt_dp_add_filter_req_msg_v01 *req,
 		struct ipa_wlan_opt_dp_add_filter_complt_ind_msg_v01 *ind)
 {
@@ -1462,7 +1451,6 @@ int ipa_wdi_opt_dpath_add_filter_req(
 	return ret;
 
 }
-EXPORT_SYMBOL(ipa_wdi_opt_dpath_add_filter_req);
 
 /**
  * ipa_wdi_opt_dpath_remove_filter_req_internal() - Sends WLAN DP filter info
@@ -1474,7 +1462,7 @@ EXPORT_SYMBOL(ipa_wdi_opt_dpath_add_filter_req);
  *
  */
 
-int ipa_wdi_opt_dpath_remove_filter_req(
+static int ipa_wdi_opt_dpath_remove_filter_req_internal(
 			struct ipa_wlan_opt_dp_remove_filter_req_msg_v01 *req,
 			struct ipa_wlan_opt_dp_remove_filter_complt_ind_msg_v01 *ind)
 {
@@ -1509,7 +1497,6 @@ int ipa_wdi_opt_dpath_remove_filter_req(
 	return ret;
 
 }
-EXPORT_SYMBOL(ipa_wdi_opt_dpath_remove_filter_req);
 
 
 
@@ -1523,7 +1510,7 @@ EXPORT_SYMBOL(ipa_wdi_opt_dpath_remove_filter_req);
  *
  */
 
-int ipa_wdi_opt_dpath_remove_all_filter_req(
+static int ipa_wdi_opt_dpath_remove_all_filter_req_internal(
 			struct ipa_wlan_opt_dp_remove_all_filter_req_msg_v01 *req,
 			struct ipa_wlan_opt_dp_remove_all_filter_resp_msg_v01 *resp)
 {
@@ -1566,7 +1553,6 @@ int ipa_wdi_opt_dpath_remove_all_filter_req(
 	return ret;
 
 }
-EXPORT_SYMBOL(ipa_wdi_opt_dpath_remove_all_filter_req);
 
 /**
  * ipa_wdi_opt_dpath_wlan_ctrl_pkt_rcvd_req - Client should call this function to
@@ -1575,7 +1561,7 @@ EXPORT_SYMBOL(ipa_wdi_opt_dpath_remove_all_filter_req);
  *
  * @Return 0 on success, negative on failure
  */
-int ipa_wdi_opt_dpath_wlan_ctrl_pkt_rcvd_req(
+static int ipa_wdi_opt_dpath_wlan_ctrl_pkt_rcvd_req_internal(
 	struct ipa_wlan_opt_dp_wlan_ctrl_pkt_rcvd_req_msg_v01 *req)
 {
 	int ret = 0;
@@ -1616,7 +1602,7 @@ int ipa_wdi_opt_dpath_wlan_ctrl_pkt_rcvd_req(
  *
  */
 
-int ipa_wdi_opt_dpath_add_ctrl_filter_req(
+static int ipa_wdi_opt_dpath_add_ctrl_filter_req_internal(
 		struct ipa_wlan_opt_dp_add_filter_req_msg_v01 *req,
 		struct ipa_wlan_opt_dp_add_filter_complt_ind_msg_v01 *ind)
 {
@@ -1723,7 +1709,6 @@ int ipa_wdi_opt_dpath_add_ctrl_filter_req(
 
 	return resp;
 }
-EXPORT_SYMBOL(ipa_wdi_opt_dpath_add_ctrl_filter_req);
 
 int ipa_wdi_opt_dpath_notify_ctrl_flt_rem_per_inst(
 		ipa_wdi_hdl_t hdl,
@@ -1771,7 +1756,7 @@ EXPORT_SYMBOL(ipa_wdi_opt_dpath_notify_ctrl_flt_rem_per_inst);
  * Returns:	0 on success, negative on failure
  */
 
-int ipa_wdi_opt_dpath_remove_ctrl_filter_req(
+static int ipa_wdi_opt_dpath_remove_ctrl_filter_req_internal(
 			struct ipa_wlan_opt_dp_remove_filter_req_msg_v01 *req,
 			struct ipa_wlan_opt_dp_remove_filter_complt_ind_msg_v01 *ind)
 {
@@ -1808,7 +1793,6 @@ int ipa_wdi_opt_dpath_remove_ctrl_filter_req(
 
 	return (resp == IPA_WDI_OPT_DPATH_RESP_ERR_TIMEOUT ? -1 : 0);
 }
-EXPORT_SYMBOL(ipa_wdi_opt_dpath_remove_ctrl_filter_req);
 
 
 /**
@@ -1818,7 +1802,7 @@ EXPORT_SYMBOL(ipa_wdi_opt_dpath_remove_ctrl_filter_req);
  *
  * @Return 0 on success, negative on failure
  */
-int ipa_wdi_opt_dpath_remove_all_ctrl_filter_req(void)
+static int ipa_wdi_opt_dpath_remove_all_ctrl_filter_req_internal(void)
 {
 	int ret = 0;
 
@@ -1840,7 +1824,6 @@ int ipa_wdi_opt_dpath_remove_all_ctrl_filter_req(void)
 
 	return ret;
 }
-EXPORT_SYMBOL(ipa_wdi_opt_dpath_remove_all_ctrl_filter_req);
 
 /**
  * ipa_wdi_opt_dpath_enable_clk_per_inst - Client should call this function to
@@ -1928,7 +1911,7 @@ EXPORT_SYMBOL(ipa_wdi_opt_dpath_disable_clk_per_inst);
  *
  * @Return 0 on success, negative on failure
  */
-int ipa_wdi_cleanup_per_inst(ipa_wdi_hdl_t hdl)
+static int ipa_wdi_cleanup_per_inst_internal(ipa_wdi_hdl_t hdl)
 {
 	struct ipa_wdi_intf_info *entry;
 	struct ipa_wdi_intf_info *next;
@@ -1969,14 +1952,13 @@ int ipa_wdi_cleanup_per_inst(ipa_wdi_hdl_t hdl)
 	ipa_wdi_ctx_list[hdl] = NULL;
 	return 0;
 }
-EXPORT_SYMBOL(ipa_wdi_cleanup_per_inst);
 
 /**
  * function to deregister before unload and after disconnect
  *
  * @Return 0 on success, negative on failure
  */
-int ipa_wdi_dereg_intf_per_inst(const char *netdev_name,ipa_wdi_hdl_t hdl)
+static int ipa_wdi_dereg_intf_per_inst_internal(const char *netdev_name,ipa_wdi_hdl_t hdl)
 {
 	int len, ret = 0;
 	struct ipa_ioc_del_hdr *hdr = NULL;
@@ -2032,13 +2014,13 @@ int ipa_wdi_dereg_intf_per_inst(const char *netdev_name,ipa_wdi_hdl_t hdl)
 			IPA_WDI_DBG("IPv4 hdr hdl: %d IPv6 hdr hdl: %d\n",
 				hdr->hdl[0].hdl, hdr->hdl[1].hdl);
 
-			if (ipa_del_hdr(hdr)) {
+			if (ipa3_del_hdr(hdr)) {
 				IPA_WDI_ERR("fail to delete partial header\n");
 				ret = -EFAULT;
 				goto fail;
 			}
 
-			if (ipa_deregister_intf(entry->netdev_name)) {
+			if (ipa3_deregister_intf(entry->netdev_name)) {
 				IPA_WDI_ERR("fail to del interface props\n");
 				ret = -EFAULT;
 				goto fail;
@@ -2055,7 +2037,6 @@ fail:
 	mutex_unlock(&ipa_wdi_ctx_list[hdl]->lock);
 	return ret;
 }
-EXPORT_SYMBOL(ipa_wdi_dereg_intf_per_inst);
 
 /**
  * function to disconnect pipes
@@ -2065,7 +2046,7 @@ EXPORT_SYMBOL(ipa_wdi_dereg_intf_per_inst);
  *
  * Returns: 0 on success, negative on failure
  */
-int ipa_wdi_disconn_pipes_per_inst(ipa_wdi_hdl_t hdl)
+static int ipa_wdi_disconn_pipes_per_inst_internal(ipa_wdi_hdl_t hdl)
 {
 	int i, ipa_ep_idx_rx, ipa_ep_idx_tx;
 	int ipa_ep_idx_tx1 = IPA_EP_NOT_ALLOCATED;
@@ -2122,11 +2103,11 @@ int ipa_wdi_disconn_pipes_per_inst(ipa_wdi_hdl_t hdl)
 			return -EFAULT;
 		}
 	} else {
-		if (ipa_disconnect_wdi_pipe(ipa_wdi_ctx_list[hdl]->tx_pipe_hdl)) {
+		if (ipa3_disconnect_wdi_pipe(ipa_wdi_ctx_list[hdl]->tx_pipe_hdl)) {
 			IPA_WDI_ERR("fail to tear down wdi tx pipes\n");
 			return -EFAULT;
 		}
-		if (ipa_disconnect_wdi_pipe(ipa_wdi_ctx_list[hdl]->rx_pipe_hdl)) {
+		if (ipa3_disconnect_wdi_pipe(ipa_wdi_ctx_list[hdl]->rx_pipe_hdl)) {
 			IPA_WDI_ERR("fail to tear down wdi rx pipes\n");
 			return -EFAULT;
 		}
@@ -2146,7 +2127,6 @@ int ipa_wdi_disconn_pipes_per_inst(ipa_wdi_hdl_t hdl)
 
 	return 0;
 }
-EXPORT_SYMBOL(ipa_wdi_disconn_pipes_per_inst);
 
 /**
  * function to disable IPA offload data path
@@ -2156,7 +2136,7 @@ EXPORT_SYMBOL(ipa_wdi_disconn_pipes_per_inst);
  *
  * Returns: 0 on success, negative on failure
  */
-int ipa_wdi_disable_pipes_per_inst(ipa_wdi_hdl_t hdl)
+static int ipa_wdi_disable_pipes_per_inst_internal(ipa_wdi_hdl_t hdl)
 {
 	int ret;
 	int ipa_ep_idx_tx, ipa_ep_idx_rx;
@@ -2205,19 +2185,19 @@ int ipa_wdi_disable_pipes_per_inst(ipa_wdi_hdl_t hdl)
 			return -EFAULT;
 		}
 	} else {
-		if (ipa_suspend_wdi_pipe(ipa_wdi_ctx_list[hdl]->tx_pipe_hdl)) {
+		if (ipa3_suspend_wdi_pipe(ipa_wdi_ctx_list[hdl]->tx_pipe_hdl)) {
 			IPA_WDI_ERR("fail to suspend wdi tx pipe\n");
 			return -EFAULT;
 		}
-		if (ipa_disable_wdi_pipe(ipa_wdi_ctx_list[hdl]->tx_pipe_hdl)) {
+		if (ipa3_disable_wdi_pipe(ipa_wdi_ctx_list[hdl]->tx_pipe_hdl)) {
 			IPA_WDI_ERR("fail to disable wdi tx pipe\n");
 			return -EFAULT;
 		}
-		if (ipa_suspend_wdi_pipe(ipa_wdi_ctx_list[hdl]->rx_pipe_hdl)) {
+		if (ipa3_suspend_wdi_pipe(ipa_wdi_ctx_list[hdl]->rx_pipe_hdl)) {
 			IPA_WDI_ERR("fail to suspend wdi rx pipe\n");
 			return -EFAULT;
 		}
-		if (ipa_disable_wdi_pipe(ipa_wdi_ctx_list[hdl]->rx_pipe_hdl)) {
+		if (ipa3_disable_wdi_pipe(ipa_wdi_ctx_list[hdl]->rx_pipe_hdl)) {
 			IPA_WDI_ERR("fail to disable wdi rx pipe\n");
 			return -EFAULT;
 		}
@@ -2241,7 +2221,6 @@ int ipa_wdi_disable_pipes_per_inst(ipa_wdi_hdl_t hdl)
 
 	return 0;
 }
-EXPORT_SYMBOL(ipa_wdi_disable_pipes_per_inst);
 
 int ipa_wdi_get_outstanding_buffers(ipa_wdi_hdl_t hdl,
 	struct ipa_wdi_outstanding_buffs *out)
@@ -2291,7 +2270,7 @@ int ipa_wdi_get_outstanding_buffers(ipa_wdi_hdl_t hdl,
 }
 EXPORT_SYMBOL_GPL(ipa_wdi_get_outstanding_buffers);
 
-int ipa_wdi_init(struct ipa_wdi_init_in_params *in,
+static int ipa_wdi_init_internal(struct ipa_wdi_init_in_params *in,
 	struct ipa_wdi_init_out_params *out)
 {
 	if (in == NULL) {
@@ -2300,34 +2279,30 @@ int ipa_wdi_init(struct ipa_wdi_init_in_params *in,
 	}
 
 	in->inst_id = DEFAULT_INSTANCE_ID;
-	return ipa_wdi_init_per_inst(in, out);
+	return ipa_wdi_init_per_inst_internal(in, out);
 }
-EXPORT_SYMBOL(ipa_wdi_init);
 
-int ipa_wdi_cleanup(void)
+static int ipa_wdi_cleanup_internal(void)
 {
-	return ipa_wdi_cleanup_per_inst(0);
+	return ipa_wdi_cleanup_per_inst_internal(0);
 }
-EXPORT_SYMBOL(ipa_wdi_cleanup);
 
-int ipa_wdi_reg_intf(struct ipa_wdi_reg_intf_in_params *in)
+static int ipa_wdi_reg_intf_internal(struct ipa_wdi_reg_intf_in_params *in)
 {
 	if (in == NULL) {
 		IPA_WDI_ERR("invalid params in=%pK\n", in);
 		return -EINVAL;
 	}
 	in->hdl = 0;
-	return ipa_wdi_reg_intf_per_inst(in);
+	return ipa_wdi_reg_intf_per_inst_internal(in);
 }
-EXPORT_SYMBOL(ipa_wdi_reg_intf);
 
-int ipa_wdi_dereg_intf(const char *netdev_name)
+static int ipa_wdi_dereg_intf_internal(const char *netdev_name)
 {
-	return ipa_wdi_dereg_intf_per_inst(netdev_name, 0);
+	return ipa_wdi_dereg_intf_per_inst_internal(netdev_name, 0);
 }
-EXPORT_SYMBOL(ipa_wdi_dereg_intf);
 
-int ipa_wdi_conn_pipes(struct ipa_wdi_conn_in_params *in,
+static int ipa_wdi_conn_pipes_internal(struct ipa_wdi_conn_in_params *in,
 			struct ipa_wdi_conn_out_params *out)
 {
 	if (!(in && out)) {
@@ -2336,35 +2311,85 @@ int ipa_wdi_conn_pipes(struct ipa_wdi_conn_in_params *in,
 	}
 
 	in->hdl = 0;
-	return ipa_wdi_conn_pipes_per_inst(in, out);
+	return ipa_wdi_conn_pipes_per_inst_internal(in, out);
 }
-EXPORT_SYMBOL(ipa_wdi_conn_pipes);
 
-int ipa_wdi_disconn_pipes(void)
+static int ipa_wdi_disconn_pipes_internal(void)
 {
-	return ipa_wdi_disconn_pipes_per_inst(0);
+	return ipa_wdi_disconn_pipes_per_inst_internal(0);
 }
-EXPORT_SYMBOL(ipa_wdi_disconn_pipes);
 
-int ipa_wdi_enable_pipes(void)
+static int ipa_wdi_enable_pipes_internal(void)
 {
-	return ipa_wdi_enable_pipes_per_inst(0);
+	return ipa_wdi_enable_pipes_per_inst_internal(0);
 }
-EXPORT_SYMBOL(ipa_wdi_enable_pipes);
 
-int ipa_wdi_disable_pipes(void)
+static int ipa_wdi_disable_pipes_internal(void)
 {
-	return ipa_wdi_disable_pipes_per_inst(0);
+	return ipa_wdi_disable_pipes_per_inst_internal(0);
 }
-EXPORT_SYMBOL(ipa_wdi_disable_pipes);
 
-int ipa_wdi_set_perf_profile(struct ipa_wdi_perf_profile *profile)
+static int ipa_wdi_set_perf_profile_internal(struct ipa_wdi_perf_profile *profile)
 {
 	if (profile == NULL) {
 		IPA_WDI_ERR("Invalid input\n");
 		return -EINVAL;
 	}
 
-	return ipa_wdi_set_perf_profile_per_inst(0, profile);
+	return ipa_wdi_set_perf_profile_per_inst_internal(0, profile);
 }
-EXPORT_SYMBOL(ipa_wdi_set_perf_profile);
+void ipa_wdi3_register(void)
+{
+	struct ipa_wdi3_data funcs = { 0 };
+
+	funcs.ipa_wdi_opt_dpath_ctrl_enabled =
+		ipa_wdi_opt_dpath_ctrl_enabled_internal;
+	funcs.ipa_wdi_bw_monitor = ipa_uc_bw_monitor;
+	funcs.ipa_wdi_cleanup = ipa_wdi_cleanup_internal;
+	funcs.ipa_wdi_conn_pipes = ipa_wdi_conn_pipes_internal;
+	funcs.ipa_wdi_create_smmu_mapping = ipa3_create_wdi_mapping;
+	funcs.ipa_wdi_dereg_intf = ipa_wdi_dereg_intf_internal;
+	funcs.ipa_wdi_disable_pipes = ipa_wdi_disable_pipes_internal;
+	funcs.ipa_wdi_disconn_pipes = ipa_wdi_disconn_pipes_internal;
+	funcs.ipa_wdi_enable_pipes = ipa_wdi_enable_pipes_internal;
+	funcs.ipa_wdi_get_stats = ipa_get_wdi_stats;
+	funcs.ipa_wdi_init = ipa_wdi_init_internal;
+	funcs.ipa_wdi_reg_intf = ipa_wdi_reg_intf_internal;
+	funcs.ipa_wdi_release_smmu_mapping = ipa3_release_wdi_mapping;
+	funcs.ipa_wdi_set_perf_profile = ipa_wdi_set_perf_profile_internal;
+	funcs.ipa_wdi_sw_stats = ipa3_set_wlan_tx_info;
+	funcs.ipa_get_wdi_version = ipa_get_wdi_version_internal;
+	funcs.ipa_wdi_is_tx1_used = ipa_wdi_is_tx1_used_internal;
+	funcs.ipa_wdi_get_capabilities = ipa_wdi_get_capabilities_internal;
+	funcs.ipa_wdi_init_per_inst = ipa_wdi_init_per_inst_internal;
+	funcs.ipa_wdi_cleanup_per_inst = ipa_wdi_cleanup_per_inst_internal;
+	funcs.ipa_wdi_reg_intf_per_inst = ipa_wdi_reg_intf_per_inst_internal;
+	funcs.ipa_wdi_dereg_intf_per_inst = ipa_wdi_dereg_intf_per_inst_internal;
+	funcs.ipa_wdi_conn_pipes_per_inst = ipa_wdi_conn_pipes_per_inst_internal;
+	funcs.ipa_wdi_disconn_pipes_per_inst = ipa_wdi_disconn_pipes_per_inst_internal;
+	funcs.ipa_wdi_enable_pipes_per_inst = ipa_wdi_enable_pipes_per_inst_internal;
+	funcs.ipa_wdi_disable_pipes_per_inst = ipa_wdi_disable_pipes_per_inst_internal;
+	funcs.ipa_wdi_set_perf_profile_per_inst = ipa_wdi_set_perf_profile_per_inst_internal;
+	funcs.ipa_wdi_create_smmu_mapping_per_inst = ipa_wdi_create_smmu_mapping_per_inst_internal;
+	funcs.ipa_wdi_release_smmu_mapping_per_inst = ipa_wdi_release_smmu_mapping_per_inst_internal;
+
+	funcs.ipa_wdi_opt_dpath_rsrv_filter_req =
+		ipa_wdi_opt_dpath_rsrv_filter_req_internal;
+	funcs.ipa_wdi_opt_dpath_add_filter_req =
+		ipa_wdi_opt_dpath_add_filter_req_internal;
+	funcs.ipa_wdi_opt_dpath_remove_filter_req =
+		ipa_wdi_opt_dpath_remove_filter_req_internal;
+	funcs.ipa_wdi_opt_dpath_remove_all_filter_req =
+		ipa_wdi_opt_dpath_remove_all_filter_req_internal;
+	funcs.ipa_wdi_opt_dpath_wlan_ctrl_pkt_rcvd_req =
+		ipa_wdi_opt_dpath_wlan_ctrl_pkt_rcvd_req_internal;
+	funcs.ipa_wdi_opt_dpath_add_ctrl_filter_req =
+		ipa_wdi_opt_dpath_add_ctrl_filter_req_internal;
+	funcs.ipa_wdi_opt_dpath_remove_ctrl_filter_req =
+		ipa_wdi_opt_dpath_remove_ctrl_filter_req_internal;
+	funcs.ipa_wdi_opt_dpath_remove_all_ctrl_filter_req =
+		ipa_wdi_opt_dpath_remove_all_ctrl_filter_req_internal;
+
+	if (ipa_fmwk_register_ipa_wdi3(&funcs))
+		pr_err("failed to register ipa_wdi3 APIs\n");
+}

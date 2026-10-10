@@ -9,7 +9,7 @@
 #include <linux/if_ether.h>
 #include <linux/log2.h>
 #include <linux/debugfs.h>
-#include "ipa_wigig.h"
+#include <linux/ipa_wigig.h>
 
 #define IPA_WIGIG_DESC_RING_EL_SIZE	32
 #define IPA_WIGIG_STATUS_RING_EL_SIZE	16
@@ -990,7 +990,7 @@ int ipa3_conn_wigig_rx_pipe_i(void *in, struct ipa_wigig_conn_out_params *out,
 		return -EFAULT;
 	}
 
-	ep_gsi = ipa_get_gsi_ep_info(rx_client);
+	ep_gsi = ipa3_get_gsi_ep_info(rx_client);
 	if (!ep_gsi) {
 		IPAERR("Failed getting GSI EP info for client=%d\n",
 			rx_client);
@@ -1284,7 +1284,7 @@ int ipa3_conn_wigig_client_i(void *in,
 		return -EFAULT;
 	}
 
-	ep_gsi = ipa_get_gsi_ep_info(tx_client);
+	ep_gsi = ipa3_get_gsi_ep_info(tx_client);
 	if (!ep_gsi) {
 		IPAERR("Failed getting GSI EP info for client=%d\n",
 			tx_client);
@@ -1418,7 +1418,7 @@ int ipa3_disconn_wigig_pipe_i(enum ipa_client_type client,
 		return -EFAULT;
 	}
 
-	ep_gsi = ipa_get_gsi_ep_info(client);
+	ep_gsi = ipa3_get_gsi_ep_info(client);
 	if (!ep_gsi) {
 		IPAERR("Failed getting GSI EP info for client=%d\n",
 			client);
@@ -1700,7 +1700,7 @@ int ipa3_enable_wigig_pipe_i(enum ipa_client_type client)
 		goto fail_enable_datapath;
 
 	memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
-	ipa_cfg_ep_ctrl(ipa_ep_idx, &ep_cfg_ctrl);
+	ipa3_cfg_ep_ctrl(ipa_ep_idx, &ep_cfg_ctrl);
 
 	/* ring the event db (outside the ring boundary)*/
 	val = ep->gsi_mem_info.evt_ring_base_addr +
@@ -1760,7 +1760,7 @@ int ipa3_enable_wigig_pipe_i(enum ipa_client_type client)
 	return 0;
 
 fail_ring_ch:
-	res = ipa_stop_gsi_channel(ipa_ep_idx);
+	res = ipa3_stop_gsi_channel(ipa_ep_idx);
 	if (res != 0 && res != -GSI_STATUS_AGAIN &&
 		res != -GSI_STATUS_TIMED_OUT) {
 		IPAERR("failed to stop channel res = %d\n", res);
@@ -1850,7 +1850,7 @@ int ipa3_disable_wigig_pipe_i(enum ipa_client_type client)
 		}
 	}
 retry_gsi_stop:
-	res = ipa_stop_gsi_channel(ipa_ep_idx);
+	res = ipa3_stop_gsi_channel(ipa_ep_idx);
 	if (res != 0 && res != -GSI_STATUS_AGAIN &&
 		res != -GSI_STATUS_TIMED_OUT) {
 		IPAERR("failed to stop channel res = %d\n", res);
@@ -1885,7 +1885,7 @@ retry_gsi_stop:
 	if (IPA_CLIENT_IS_PROD(ep->client)) {
 		memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
 		ep_cfg_ctrl.ipa_ep_delay = true;
-		ipa_cfg_ep_ctrl(ipa_ep_idx, &ep_cfg_ctrl);
+		ipa3_cfg_ep_ctrl(ipa_ep_idx, &ep_cfg_ctrl);
 	}
 
 	ep->gsi_offload_state &= ~IPA_WIGIG_ENABLED;
