@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -382,6 +382,8 @@ static void wma_set_default_tgt_config(tp_wma_handle wma_handle,
 
 	cfg_nan_get_max_ndi(wma_handle->psoc,
 			    &tgt_cfg->max_ndi);
+	tgt_cfg->apfv6_offload_disabled = cfg_get(wma_handle->psoc,
+						  CFG_OFFLOAD_APFV6_MODE);
 
 	if (cds_get_conparam() == QDF_GLOBAL_MONITOR_MODE)
 		tgt_cfg->rx_decap_mode = CFG_TGT_RX_DECAP_MODE_RAW;
@@ -5771,6 +5773,10 @@ static void wma_set_pmo_caps(struct wlan_objmgr_psoc *psoc)
 		wmi_service_enabled(wma->wmi_handle,
 				    wmi_service_listen_interval_offload_support
 				    );
+	caps.apf_offload_enabled =
+		wmi_service_enabled(wma->wmi_handle,
+				    wmi_service_apf_data_offload_support_enabled
+				    );
 
 	status = ucfg_pmo_psoc_set_caps(psoc, &caps);
 	if (QDF_IS_STATUS_ERROR(status))
@@ -6704,7 +6710,6 @@ static void wma_update_hw_mode_config(tp_wma_handle wma_handle,
 				      struct target_psoc_info *tgt_hdl)
 {
 	uint32_t conc_scan_config_bits, fw_config_bits;
-	uint8_t sta_sap_scc_on_dfs_chnl;
 
 	fw_config_bits = target_if_get_fw_config_bits(tgt_hdl);
 	conc_scan_config_bits = target_if_get_conc_scan_config_bits(tgt_hdl);
@@ -6721,18 +6726,6 @@ static void wma_update_hw_mode_config(tp_wma_handle wma_handle,
 	}
 	wma_init_scan_fw_mode_config(wma_handle->psoc, conc_scan_config_bits,
 				     fw_config_bits);
-
-	policy_mgr_get_sta_sap_scc_on_dfs_chnl(wma_handle->psoc,
-					       &sta_sap_scc_on_dfs_chnl);
-
-	/*
-	 * For non-dbs HW, disallow sta+sap on DFS channel as if SAP comes
-	 * on DFS master mode enable (sta_sap_scc_on_dfs_chnl = 2), scan will
-	 * be disabled and STA cannot connect to any other channel
-	 */
-	if (!policy_mgr_is_hw_dbs_capable(wma_handle->psoc) &&
-	    sta_sap_scc_on_dfs_chnl == 2)
-		policy_mgr_set_sta_sap_scc_on_dfs_chnl(wma_handle->psoc, 1);
 }
 
 int wma_rx_service_ready_ext2_event(void *handle, uint8_t *ev, uint32_t len)

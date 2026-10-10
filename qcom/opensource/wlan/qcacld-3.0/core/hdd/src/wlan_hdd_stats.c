@@ -3983,7 +3983,7 @@ hdd_get_roam_rt_stats_event_len(struct roam_stats_event *roam_stats,
 
 	if (roam_stats->scan[idx].present) {
 		if (roam_stats->scan[idx].num_chan &&
-		    !roam_stats->scan[idx].type)
+		    roam_stats->scan[idx].type == ROAM_STATS_SCAN_TYPE_PARTIAL)
 			for (i = 0; i < roam_stats->scan[idx].num_chan;)
 				i++;
 
@@ -4057,7 +4057,8 @@ roam_rt_stats_fill_scan_freq(struct sk_buff *vendor_event, uint8_t idx,
 		kfree_skb(vendor_event);
 		return;
 	}
-	if (roam_stats->scan[idx].num_chan && !roam_stats->scan[idx].type) {
+	if (roam_stats->scan[idx].num_chan &&
+	    roam_stats->scan[idx].type == ROAM_STATS_SCAN_TYPE_PARTIAL) {
 		for (i = 0; i < roam_stats->scan[idx].num_chan; i++) {
 			if (nla_put_u32(vendor_event, i,
 					roam_stats->scan[idx].chan_freq[i])) {
@@ -6352,7 +6353,7 @@ static int __wlan_hdd_cfg80211_dump_survey(struct wiphy *wiphy,
 	bool filled = false;
 
 	if (idx > NUM_CHANNELS - 1)
-		return -EINVAL;
+		return -ENOENT;
 
 	hdd_ctx = WLAN_HDD_GET_CTX(adapter);
 	status = wlan_hdd_validate_context(hdd_ctx);
@@ -6380,7 +6381,7 @@ static int __wlan_hdd_cfg80211_dump_survey(struct wiphy *wiphy,
 	filled = wlan_hdd_update_survey_info(wiphy, adapter, survey, idx);
 
 	if (!filled)
-		return -ENONET;
+		return -ENOENT;
 
 	return 0;
 }

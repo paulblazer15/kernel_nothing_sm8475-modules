@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2006-2007, 2014-2018, 2020-2021 The Linux Foundation.
  * All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022, 2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1453,7 +1453,7 @@ IE RSN (EID_RSN)                          // 7.3.2.25
     OPTIONAL RSN_Cap[2];
     // Finally, the IE may contain zero or more PMKIDs:
     OPTIONAL pmkid_count, 2;
-    pmkid[16][0..4] COUNTIS pmkid_count;
+    pmkid[16][0..11] COUNTIS pmkid_count;
     OPTIONAL gp_mgmt_cipher_suite[4];
 }
 
@@ -3864,7 +3864,7 @@ FRAME Beacon                              // C.f. Sec. 7.2.3.1
     OPTIE  TPCReport;
     OPTIE  ERPInfo;
     OPTIE  ExtSuppRates;
-    OPTIE  RSN;
+    OPTIE  RSNOpaque;
     OPTIE  QBSSLoad;
     OPTIE  EDCAParamSet;
     OPTIE  QOSCapsAp;
@@ -4046,7 +4046,7 @@ FRAME BeaconIEs
     OPTIE  TPCReport;
     OPTIE  ERPInfo;
     OPTIE  ExtSuppRates;
-    OPTIE  RSN;
+    OPTIE  RSNOpaque;
     OPTIE  QBSSLoad;
     OPTIE  EDCAParamSet;
     OPTIE  QOSCapsAp;
@@ -4572,7 +4572,7 @@ FRAME RadioMeasurementReport
    FF   Action;
    FF   DialogToken;
    //Measurement Report elements.
-   MANDIE MeasurementReport[1];
+   MANDIE MeasurementReport[1..8];
 }
 
 FRAME LinkMeasurementRequest

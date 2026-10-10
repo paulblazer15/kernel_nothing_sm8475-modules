@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -2903,6 +2903,10 @@ cm_roam_start_req(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
 	wlan_cm_roam_cfg_get_value(psoc, vdev_id, ROAM_RSSI_DIFF_6GHZ, &temp);
 	start_req->wlan_roam_rssi_diff_6ghz = temp.uint_value;
 
+	wlan_cm_roam_cfg_get_value(psoc, vdev_id,
+				   ROAM_RSSI_DELTA_6GHZ_TO_NON_6GHZ, &temp);
+	start_req->wlan_roam_rssi_delta_6ghz_to_non_6ghz = temp.uint_value;
+
 	status = wlan_cm_tgt_send_roam_start_req(psoc, vdev_id, start_req);
 	if (QDF_IS_STATUS_ERROR(status))
 		mlme_debug("fail to send roam start");
@@ -2999,6 +3003,10 @@ cm_roam_update_config_req(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
 
 	wlan_cm_roam_cfg_get_value(psoc, vdev_id, ROAM_RSSI_DIFF_6GHZ, &temp);
 	update_req->wlan_roam_rssi_diff_6ghz = temp.uint_value;
+
+	wlan_cm_roam_cfg_get_value(psoc, vdev_id,
+				   ROAM_RSSI_DELTA_6GHZ_TO_NON_6GHZ, &temp);
+	update_req->wlan_roam_rssi_delta_6ghz_to_non_6ghz = temp.uint_value;
 
 	status = wlan_cm_tgt_send_roam_update_req(psoc, vdev_id, update_req);
 	if (QDF_IS_STATUS_ERROR(status))
@@ -4327,6 +4335,18 @@ cm_roam_state_change(struct wlan_objmgr_pdev *pdev,
 	if (is_rso_skip)
 		return status;
 
+	vdev = wlan_objmgr_get_vdev_by_id_from_pdev(pdev, vdev_id,
+						    WLAN_MLME_CM_ID);
+	if (!vdev) {
+		mlme_err("Invalid vdev");
+		goto end;
+	}
+	status = cm_roam_acquire_lock(vdev);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		mlme_err("Fail to acquire lock, status: %d", status);
+		goto release_ref;
+	}
+
 	switch (requested_state) {
 	case WLAN_ROAM_DEINIT:
 		status = cm_roam_switch_to_deinit(pdev, vdev_id, reason);
@@ -4352,6 +4372,11 @@ cm_roam_state_change(struct wlan_objmgr_pdev *pdev,
 		break;
 	}
 
+	cm_roam_release_lock(vdev);
+
+release_ref:
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_CM_ID);
+end:
 	return status;
 }
 
@@ -4689,6 +4714,8 @@ cm_restore_default_roaming_params(struct wlan_mlme_psoc_ext_obj *mlme_obj,
 			mlme_obj->cfg.lfr.roam_rssi_diff;
 	cfg_params->roam_rssi_diff_6ghz =
 			mlme_obj->cfg.lfr.roam_rssi_diff_6ghz;
+	cfg_params->roam_rssi_delta_6ghz_to_non_6ghz =
+			mlme_obj->cfg.lfr.roam_rssi_delta_6ghz_to_non_6ghz;
 	cfg_params->bg_rssi_threshold =
 			mlme_obj->cfg.lfr.bg_rssi_threshold;
 
@@ -5177,6 +5204,10 @@ static void cm_roam_start_init(struct wlan_objmgr_psoc *psoc,
 	wlan_cm_roam_cfg_set_value(psoc, vdev_id,
 				   ROAM_RSSI_DIFF_6GHZ, &src_cfg);
 
+	src_cfg.uint_value = mlme_obj->cfg.lfr.roam_rssi_delta_6ghz_to_non_6ghz;
+	wlan_cm_roam_cfg_set_value(psoc, vdev_id,
+				   ROAM_RSSI_DELTA_6GHZ_TO_NON_6GHZ, &src_cfg);
+
 	if (!mlme_obj->cfg.lfr.roam_scan_offload_enabled)
 		return;
 	/*
@@ -5242,6 +5273,8 @@ void cm_update_session_assoc_ie(struct wlan_objmgr_psoc *psoc,
 	if (!rso_cfg->assoc_ie.ptr)
 		goto rel_vdev_ref;
 
+	cm_update_ext_cap_ie_at_source(psoc, assoc_ie);
+
 	rso_cfg->assoc_ie.len = assoc_ie->len;
 	qdf_mem_copy(rso_cfg->assoc_ie.ptr, assoc_ie->ptr, assoc_ie->len);
 rel_vdev_ref:
@@ -5295,7 +5328,7 @@ QDF_STATUS cm_start_roam_invoke(struct wlan_objmgr_psoc *psoc,
 		}
 
 		cm_req->roam_req.req.forced_roaming = true;
-		if (source == CM_ROAMING_HOST)
+		if (source == CM_ROAMING_HOST || source == CM_ROAMING_USER)
 			rso_cfg->is_forced_roaming = true;
 		source = CM_ROAMING_NUD_FAILURE;
 		goto send_evt;
@@ -5333,7 +5366,8 @@ send_evt:
 	 * information and disconnect if needed.
 	 */
 	if (source == CM_ROAMING_HOST ||
-	    source == CM_ROAMING_NUD_FAILURE)
+	    source == CM_ROAMING_NUD_FAILURE ||
+	    source == CM_ROAMING_USER)
 		rso_cfg->roam_invoke_source = source;
 
 	cm_req->roam_req.req.vdev_id = vdev_id;
@@ -5814,9 +5848,8 @@ cm_send_roam_invoke_req(struct cnx_mgr *cm_ctx, struct cm_req *req)
 					roam_invoke_req);
 
 	if (QDF_IS_STATUS_ERROR(status)) {
-		mlme_err(CM_PREFIX_FMT "No Candidate found",
+		mlme_err(CM_PREFIX_FMT "No Candidate found, send roam invoke req, fw will perform scan",
 			 CM_PREFIX_REF(vdev_id, cm_id));
-		goto roam_err;
 	}
 
 	if (wlan_cm_get_ese_assoc(pdev, vdev_id)) {

@@ -2585,15 +2585,6 @@ wlan_mlme_get_ignore_fw_reg_offload_ind(struct wlan_objmgr_psoc *psoc,
 char *mlme_get_roam_trigger_str(uint32_t roam_scan_trigger);
 
 /**
- * mlme_get_roam_scan_type_str() - Get the string for roam sacn type
- * @roam_scan_type: roam scan type coming from fw via
- * wmi_roam_scan_info tlv
- *
- *  Return: Meaningful string for roam sacn type
- */
-char *mlme_get_roam_scan_type_str(uint32_t roam_scan_type);
-
-/**
  * mlme_get_roam_status_str() - Get the string for roam status
  * @roam_status: roam status coming from fw via
  * wmi_roam_scan_info tlv
@@ -2748,7 +2739,7 @@ wlan_mlme_get_mgmt_6ghz_rate_support(struct wlan_objmgr_psoc *psoc,
  */
 QDF_STATUS
 wlan_mlme_get_status_ring_buffer(struct wlan_objmgr_psoc *psoc,
-				 bool *enable_ring_buffer);
+				 uint32_t *enable_ring_buffer);
 
 /**
  * wlan_mlme_get_peer_unmap_conf() - Indicate if peer unmap confirmation
@@ -3661,4 +3652,15 @@ QDF_STATUS
 wlan_mlme_get_sta_keep_alive_period(struct wlan_objmgr_psoc *psoc,
 				    uint32_t *keep_alive_period);
 
+/**
+ * wlan_mlme_get_reduce_pwr_scan_mode() - Get reduce power scan mode
+ * enabled or disabled
+ * @psoc: pointer to psoc object
+ * @scan_mode: pointer to hold value of scan mode
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+wlan_mlme_get_reduce_pwr_scan_mode(struct wlan_objmgr_psoc *psoc,
+				   bool *scan_mode);
 #endif /* _WLAN_MLME_API_H_ */

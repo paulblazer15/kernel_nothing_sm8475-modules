@@ -4204,6 +4204,9 @@ static uint8_t sme_get_nss_chain_shift(enum QDF_OPMODE device_mode)
 		return OCB_NSS_CHAINS_SHIFT;
 	case QDF_TDLS_MODE:
 		return TDLS_NSS_CHAINS_SHIFT;
+	case QDF_NDI_MODE:
+	case QDF_NAN_DISC_MODE:
+		return NAN_NSS_CHAIN_SHIFT;
 
 	default:
 		sme_err("Device mode %d invalid", device_mode);
@@ -12740,7 +12743,7 @@ uint32_t sme_get_wni_dot11_mode(mac_handle_t mac_handle)
  *
  * Return: QDF_STATUS_SUCCESS on success, non-zero error code on failure.
  */
-QDF_STATUS sme_create_mon_session(mac_handle_t mac_handle, tSirMacAddr bss_id,
+QDF_STATUS sme_create_mon_session(mac_handle_t mac_handle, uint8_t *bss_id,
 				  uint8_t vdev_id)
 {
 	QDF_STATUS status = QDF_STATUS_E_FAILURE;
@@ -13260,6 +13263,19 @@ QDF_STATUS sme_set_sar_power_limits(mac_handle_t mac_handle,
 		return QDF_STATUS_E_FAILURE;
 
 	return wma_set_sar_limit(wma_handle, sar_limit_cmd);
+}
+
+QDF_STATUS sme_set_tx_power_per_mcs(
+			   mac_handle_t mac_handle,
+			   struct tx_power_per_mcs_rate *txpower_adjust_params)
+{
+	void *wma_handle;
+
+	wma_handle = cds_get_context(QDF_MODULE_ID_WMA);
+	if (!wma_handle)
+		return QDF_STATUS_E_FAILURE;
+
+	return wma_set_tx_power_per_mcs(wma_handle, txpower_adjust_params);
 }
 
 QDF_STATUS sme_send_coex_config_cmd(struct coex_config_params *coex_cfg_params)
