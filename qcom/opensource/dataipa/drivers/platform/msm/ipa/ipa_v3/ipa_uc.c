@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
+ *
+ * Copyright (c) 2024-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include "ipa_i.h"
@@ -574,7 +576,7 @@ static void ipa3_event_ring_hdlr(void)
 
 		if (((struct eventElement_t *) rp_va)->Opcode == BW_NOTIFY) {
 			e_b = ((struct eventElement_t *) rp_va);
-			IPADBG("prot(%d), index (%d) throughput (%lu)\n",
+			IPADBG("prot(%d), index (%d) throughput (%llu)\n",
 			e_b->Protocol,
 			e_b->Value.bw_param.ThresholdIndex,
 			e_b->Value.bw_param.throughput);
@@ -591,11 +593,11 @@ static void ipa3_event_ring_hdlr(void)
 		} else if (((struct eventElement_t *) rp_va)->Opcode
 			== QUOTA_NOTIFY) {
 			e_q = ((struct eventElement_t *) rp_va);
-			IPADBG("got quota-notify %d reach(%d) usage (%lu)\n",
+			IPADBG("got quota-notify %d reach(%d) usage (%llu)\n",
 			e_q->Protocol,
 			e_q->Value.quota_param.ThreasholdReached,
 			e_q->Value.quota_param.usage);
-			if (ipa3_broadcast_wdi_quota_reach_ind(0,
+			if (ipa_broadcast_wdi_quota_reach_ind(0,
 				e_q->Value.quota_param.usage))
 				IPAERR_RL("failed on quota_reach for %d\n",
 						e_q->Protocol);
@@ -769,7 +771,8 @@ static void ipa3_uc_event_handler(enum ipa_irq_type interrupt,
 		ipa3_ctx->uc_ctx.uc_error_timestamp =
 			ipahal_read_reg(IPA_TAG_TIMER);
 		/* Unexpected UC hardware state */
-		ipa_assert();
+		if (!ipa3_ctx->is_device_crashed)
+			ipa_assert();
 	} else if (ipa3_ctx->uc_ctx.uc_sram_mmio->eventOp ==
 		IPA_HW_2_CPU_EVENT_LOG_INFO) {
 		IPADBG("uC evt log info ofst=0x%x\n",
@@ -1127,7 +1130,7 @@ int ipa3_uc_interface_init(void)
 	}
 
 	if (!ipa3_ctx->apply_rg10_wa) {
-		result = ipa3_add_interrupt_handler(IPA_UC_IRQ_0,
+		result = ipa_add_interrupt_handler(IPA_UC_IRQ_0,
 			ipa3_uc_event_handler, true,
 			ipa3_ctx);
 		if (result) {
@@ -1136,7 +1139,7 @@ int ipa3_uc_interface_init(void)
 			goto irq_fail0;
 		}
 
-		result = ipa3_add_interrupt_handler(IPA_UC_IRQ_1,
+		result = ipa_add_interrupt_handler(IPA_UC_IRQ_1,
 			ipa3_uc_response_hdlr, true,
 			ipa3_ctx);
 		if (result) {
@@ -1145,7 +1148,7 @@ int ipa3_uc_interface_init(void)
 			goto irq_fail1;
 		}
 
-		result = ipa3_add_interrupt_handler(IPA_UC_IRQ_2,
+		result = ipa_add_interrupt_handler(IPA_UC_IRQ_2,
 			ipa3_uc_wigig_misc_int_handler, true,
 			ipa3_ctx);
 		if (result) {
@@ -1210,7 +1213,7 @@ void ipa3_uc_load_notify(void)
 
 	ipa3_init_interrupts();
 
-	result = ipa3_add_interrupt_handler(IPA_UC_IRQ_0,
+	result = ipa_add_interrupt_handler(IPA_UC_IRQ_0,
 		ipa3_uc_event_handler, true,
 		ipa3_ctx);
 	if (result)
@@ -1292,7 +1295,7 @@ int ipa3_uc_is_gsi_channel_empty(enum ipa_client_type ipa_client)
 	union IpaHwChkChEmptyCmdData_t cmd;
 	int ret;
 
-	gsi_ep_info = ipa3_get_gsi_ep_info(ipa_client);
+	gsi_ep_info = ipa_get_gsi_ep_info(ipa_client);
 	if (!gsi_ep_info) {
 		IPAERR("Failed getting GSI EP info for client=%d\n",
 		       ipa_client);
@@ -1514,7 +1517,7 @@ int ipa3_uc_memcpy(phys_addr_t dest, phys_addr_t src, int len)
 	struct IpaHwMemCopyData_t *cmd;
 
 	IPADBG("dest 0x%pa src 0x%pa len %d\n", &dest, &src, len);
-	mem.size = sizeof(cmd);
+	mem.size = sizeof(*cmd);
 	mem.base = dma_alloc_coherent(ipa3_ctx->pdev, mem.size, &mem.phys_base,
 		GFP_KERNEL);
 	if (!mem.base) {
@@ -1733,6 +1736,11 @@ int ipa3_uc_quota_monitor(uint64_t quota)
 	struct ipa_mem_buffer cmd;
 	struct IpaQuotaMonitoring_t *quota_info;
 
+	if (!ipa3_ctx->fnr_info.valid) {
+		IPAERR("fnr_info not valid!\n");
+		return -EINVAL;
+	}
+
 	cmd.size = sizeof(*quota_info);
 	cmd.base = dma_alloc_coherent(ipa3_ctx->uc_pdev, cmd.size,
 		&cmd.phys_base, GFP_KERNEL);
@@ -1773,7 +1781,7 @@ int ipa3_uc_quota_monitor(uint64_t quota)
 		false, 10 * HZ);
 
 	if (res) {
-		IPAERR(" faile to set quota %d, number offset %d\n",
+		IPAERR(" faile to set quota %llu, number offset %d\n",
 			quota_info->params.WdiQM.Quota,
 			quota_info->params.WdiQM.info.Num);
 		goto free_cmd;
@@ -1792,7 +1800,7 @@ free_cmd:
 	return res;
 }
 
-int ipa3_uc_bw_monitor(struct ipa_wdi_bw_info *info)
+int ipa_uc_bw_monitor(struct ipa_wdi_bw_info *info)
 {
 	int i, ind, res = 0;
 	struct ipa_mem_buffer cmd;
@@ -1800,6 +1808,11 @@ int ipa3_uc_bw_monitor(struct ipa_wdi_bw_info *info)
 
 	if (!info)
 		return -EINVAL;
+
+	if (!ipa3_ctx->fnr_info.valid) {
+		IPAERR("fnr_info not valid!\n");
+		return -EINVAL;
+	}
 
 	/* check max entry */
 	if (info->num > BW_MONITORING_MAX_THRESHOLD) {
@@ -1822,7 +1835,7 @@ int ipa3_uc_bw_monitor(struct ipa_wdi_bw_info *info)
 
 	for (i = 0; i < info->num; i++) {
 		bw_info->params.WdiBw.BwThreshold[i] = info->threshold[i];
-		IPADBG("%d-st, %lu\n", i, bw_info->params.WdiBw.BwThreshold[i]);
+		IPADBG("%d-st, %llu\n", i, bw_info->params.WdiBw.BwThreshold[i]);
 	}
 
 	bw_info->params.WdiBw.info.Num = 8;
@@ -1889,6 +1902,7 @@ free_cmd:
 
 	return res;
 }
+EXPORT_SYMBOL(ipa_uc_bw_monitor);
 
 int ipa3_set_wlan_tx_info(struct ipa_wdi_tx_info *info)
 {

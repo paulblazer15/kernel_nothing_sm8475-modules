@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ *
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/device.h>
@@ -192,7 +193,7 @@ static int ipa3_nat_ipv6ct_mmap(
 			if (dev->phys_mem_size == 0 ||
 				dev->phys_mem_size > vsize) {
 				IPAERR_RL(
-				 "%s err vsize(0x%X) phys_mem_size(0x%X)\n",
+				 "%s err vsize(0x%lX) phys_mem_size(0x%X)\n",
 				 dev->name, vsize, dev->phys_mem_size);
 				result = -EINVAL;
 				goto unlock;
@@ -206,7 +207,7 @@ static int ipa3_nat_ipv6ct_mmap(
 
 		if (nmi == IPA_NAT_MEM_IN_DDR) {
 
-			IPADBG("map sz=0x%zx -> vma size=0x%08x\n",
+			IPADBG("map sz=0x%zx -> vma size=0x%08lx\n",
 				   mld_ptr->table_alloc_size,
 				   vsize);
 
@@ -229,7 +230,7 @@ static int ipa3_nat_ipv6ct_mmap(
 
 		} else { /* nmi == IPA_NAT_MEM_IN_SRAM */
 
-			IPADBG("map phys_mem_size(0x%08X) -> vma sz(0x%08X)\n",
+			IPADBG("map phys_mem_size(0x%08X) -> vma sz(0x%08lX)\n",
 				   dev->phys_mem_size, vsize);
 
 			vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
@@ -270,7 +271,7 @@ static int ipa3_nat_ipv6ct_mmap(
 		IPADBG("Mapping V6 CT: %s\n",
 			   ipa3_nat_mem_in_as_str(IPA_NAT_MEM_IN_DDR));
 
-		IPADBG("map sz=0x%zx -> vma size=0x%08x\n",
+		IPADBG("map sz=0x%zx -> vma size=0x%08lx\n",
 			   dev->table_alloc_size,
 			   vsize);
 
@@ -359,9 +360,9 @@ static int ipa3_nat_ipv6ct_init_device(
 		goto bail;
 	}
 
-	strlcpy(dev->name, name, IPA_DEV_NAME_MAX_LEN);
+	strscpy(dev->name, name, IPA_DEV_NAME_MAX_LEN);
 
-	dev->class = class_create(THIS_MODULE, name);
+	dev->class = class_create(name);
 
 	if (IS_ERR(dev->class)) {
 		IPAERR("unable to create the class for %s\n", name);
@@ -595,7 +596,7 @@ static int ipa3_nat_ipv6ct_allocate_mem(
 			 * CAN fit in SRAM, hence we'll use SRAM...
 			 * And SRAM allowed
 			 */
-			IPADBG("V4 NAT with size 0x%08X will reside in: %s\n",
+			IPADBG("V4 NAT with size 0x%08lX will reside in: %s\n",
 				   table_alloc->size,
 				   ipa3_nat_mem_in_as_str(IPA_NAT_MEM_IN_SRAM));
 
@@ -638,7 +639,7 @@ static int ipa3_nat_ipv6ct_allocate_mem(
 			/*
 			 * CAN NOT fit in SRAM OR SRAM not allowed, hence we'll allocate DDR...
 			 */
-			IPADBG("V4 NAT with size 0x%08X will reside in: %s\n",
+			IPADBG("V4 NAT with size 0x%08lX will reside in: %s\n",
 				   table_alloc->size,
 				   ipa3_nat_mem_in_as_str(IPA_NAT_MEM_IN_DDR));
 
@@ -671,7 +672,7 @@ static int ipa3_nat_ipv6ct_allocate_mem(
 	} else {
 		if (nat_type == IPAHAL_NAT_IPV6CT) {
 
-			IPADBG("V6 CT with size 0x%08X will reside in: %s\n",
+			IPADBG("V6 CT with size 0x%08lX will reside in: %s\n",
 				   table_alloc->size,
 				   ipa3_nat_mem_in_as_str(IPA_NAT_MEM_IN_DDR));
 
@@ -742,7 +743,7 @@ int ipa3_allocate_nat_table(
 
 	int result;
 
-	IPADBG("table size:%u offset:%u\n",
+	IPADBG("table size:%lu offset:%lu\n",
 		   table_alloc->size, table_alloc->offset);
 
 	mutex_lock(&nm_ptr->dev.lock);
@@ -987,7 +988,7 @@ static inline bool chk_sram_offset_alignment(
 	u32       mask)
 {
 	if (addr & (uintptr_t) mask) {
-		IPAERR("sram addr(%pK) is not properly aligned\n", addr);
+		IPAERR("sram addr(%luK) is not properly aligned\n", addr);
 		return false;
 	}
 	return true;
@@ -1216,11 +1217,11 @@ static int ipa3_nat_send_init_cmd(struct ipahal_imm_cmd_ip_v4_nat_init *cmd,
 	memset(cmd_pyld, 0, sizeof(cmd_pyld));
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
-	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1
+	if (ipa_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1
 		&& !ipa3_ctx->ulso_wa) {
 		u32 offset = 0;
 
-		i = ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS);
+		i = ipa_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS);
 		reg_write_coal_close.skip_pipeline_clear = false;
 		reg_write_coal_close.pipeline_clear_options = IPAHAL_HPS_CLEAR;
 		if (ipa3_ctx->ipa_hw_type < IPA_HW_v5_0)
@@ -1327,10 +1328,10 @@ static int ipa3_ipv6ct_send_init_cmd(struct ipahal_imm_cmd_ip_v6_ct_init *cmd)
 	memset(cmd_pyld, 0, sizeof(cmd_pyld));
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
-	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1
+	if (ipa_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1
 		&& !ipa3_ctx->ulso_wa) {
 		u32 offset = 0;
-		i = ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS);
+		i = ipa_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS);
 		reg_write_coal_close.skip_pipeline_clear = false;
 		reg_write_coal_close.pipeline_clear_options = IPAHAL_HPS_CLEAR;
 		if (ipa3_ctx->ipa_hw_type < IPA_HW_v5_0)
@@ -1617,8 +1618,9 @@ int ipa3_ipv6ct_init_cmd(
 		return -EPERM;
 	}
 
-	if (init->table_entries == 0) {
-		IPAERR_RL("Table entries is zero\n");
+	if (init->table_entries == 0 ||
+		init->table_entries == U16_MAX) {
+		IPAERR_RL("Table entries is %d\n", init->table_entries);
 		return -EPERM;
 	}
 
@@ -1985,7 +1987,7 @@ int ipa3_table_dma_cmd(
 	 * IPA_MAX_NUM_OF_TABLE_DMA_CMD_DESC - 1 to overcome
 	 * buffer overflow of ipa3_desc array.
 	 */
-	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1)
+	if (ipa_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1)
 		max_dma_table_cmds -= 1;
 
 	if (!dma->entries || dma->entries > (max_dma_table_cmds - 1)) {
@@ -2008,11 +2010,11 @@ int ipa3_table_dma_cmd(
 	}
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
-	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1
+	if (ipa_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1
 		&& !ipa3_ctx->ulso_wa) {
 		u32 offset = 0;
 
-		i = ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS);
+		i = ipa_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS);
 		reg_write_coal_close.skip_pipeline_clear = false;
 		reg_write_coal_close.pipeline_clear_options = IPAHAL_HPS_CLEAR;
 		if (ipa3_ctx->ipa_hw_type < IPA_HW_v5_0)
@@ -2334,53 +2336,6 @@ int ipa3_nat_del_cmd(struct ipa_ioc_v4_nat_del *del)
 	tmp.table_index = del->table_index;
 
 	return ipa3_del_nat_table(&tmp);
-}
-
-/**
- * ipa3_nat_cleanup_cmd() - Delete a NAT table
- *
- * Called by NAT client driver to delete the nat table
- * as part of cleanup if IPACM restart
- *
- * Returns:     0 on success, negative on failure
- */
-
-int ipa3_nat_cleanup_cmd(void)
-{
-	struct ipa3_nat_ipv6ct_common_mem *dev = &ipa3_ctx->nat_mem.dev;
-	struct ipa3_nat_mem *nm_ptr;
-	struct ipa_ioc_nat_ipv6ct_table_del del;
-
-	int result = 0;
-
-	IPADBG("In\n");
-
-	if (!dev->is_dev_init) {
-		IPAERR("NAT hasn't been initialized\n");
-		result = -EPERM;
-		goto bail;
-	}
-	if (dev->is_nat_mem) {
-		nm_ptr = (struct ipa3_nat_mem *) dev;
-		if (nm_ptr->sram_in_use) {
-			memset(&del, 0, sizeof(del));
-			del.mem_type = IPA_NAT_MEM_IN_SRAM;
-			ipa3_del_nat_table(&del);
-		}
-		if (nm_ptr->ddr_in_use) {
-			memset(&del, 0, sizeof(del));
-			del.mem_type = IPA_NAT_MEM_IN_DDR;
-			ipa3_del_nat_table(&del);
-		}
-	}
-	if (dev->is_ipv6ct_mem) {
-		memset(&del, 0, sizeof(del));
-		ipa3_del_nat_table(&del);
-	}
-
-bail:
-	IPADBG("Out\n");
-	return result;
 }
 
 /**

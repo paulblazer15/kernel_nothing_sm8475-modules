@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <asm/barrier.h>
@@ -26,7 +26,7 @@
 #define IPA_POLL_FOR_EMPTINESS_SLEEP_USEC 20
 #define IPA_CHANNEL_STOP_IN_PROC_TO_MSEC 5
 #define IPA_CHANNEL_STOP_IN_PROC_SLEEP_USEC 200
-#define IPA_MAX_HOLB_TMR_VAL (4294967296 - 1)
+
 /* xfer_rsc_idx should be 7 bits */
 #define IPA_XFER_RSC_IDX_MAX 127
 
@@ -76,29 +76,22 @@ int ipa3_enable_data_path(u32 clnt_hdl)
 				 ep->client == IPA_CLIENT_USB_CONS)) {
 			holb_cfg.en = IPA_HOLB_TMR_EN;
 			holb_cfg.tmr_val = IPA_HOLB_TMR_VAL_4_5;
-		} else if (ipa3_ctx->ipa_hw_type == IPA_HW_v3_0 &&
-				ep->client == IPA_CLIENT_USB_CONS) {
-			holb_cfg.en = IPA_HOLB_TMR_EN;
-			holb_cfg.tmr_val = IPA_MAX_HOLB_TMR_VAL;
 		} else if (ipa3_ctx->ipa_hw_type >= IPA_HW_v5_1 &&
 			ipa3_ctx->platform_type == IPA_PLAT_TYPE_APQ &&
 			ep->client == IPA_CLIENT_USB_CONS) {
-			holb_cfg.en = IPA_HOLB_TMR_EN;
-			holb_cfg.tmr_val = IPA_HOLB_TMR_VAL_4_5;
-		} else if (ipa3_ctx->ipa_hw_type >= IPA_HW_v5_1 &&
-			ep->client == IPA_CLIENT_APPS_WAN_CONS) {
 			holb_cfg.en = IPA_HOLB_TMR_EN;
 			holb_cfg.tmr_val = IPA_HOLB_TMR_VAL_4_5;
 		} else if ((ipa3_ctx->ipa_hw_type == IPA_HW_v4_5) &&
 				(ep->client == IPA_CLIENT_USB_CONS)) {
 			holb_cfg.tmr_val = IPA_HOLB_TMR_VAL_4_5;
 			holb_cfg.en = IPA_HOLB_TMR_EN;
-		} else if ((ipa3_ctx->ipa_hw_type == IPA_HW_v5_0) &&
-				(ep->client == IPA_CLIENT_USB_CONS)) {
+		} else if ((ipa3_ctx->ipa_hw_type >= IPA_HW_v5_2) &&
+				(ep->client == IPA_CLIENT_USB_CONS ||
+				ep->client == IPA_CLIENT_APPS_WAN_CONS)) {
 			holb_cfg.tmr_val = IPA_HOLB_TMR_VAL_4_5;
 			holb_cfg.en = IPA_HOLB_TMR_EN;
-		} else if ((ipa3_ctx->ipa_hw_type >= IPA_HW_v5_2) &&
-				(ep->client == IPA_CLIENT_USB_CONS)) {
+		} else if ((ipa3_ctx->ipa_hw_type >= IPA_HW_v5_5) &&
+				ep->client == IPA_CLIENT_APPS_WAN_COAL_CONS) {
 			holb_cfg.tmr_val = IPA_HOLB_TMR_VAL_4_5;
 			holb_cfg.en = IPA_HOLB_TMR_EN;
 		} else {
@@ -116,7 +109,7 @@ int ipa3_enable_data_path(u32 clnt_hdl)
 		    !ipa3_should_pipe_be_suspended(ep->client))) {
 			memset(&ep_cfg_ctrl, 0, sizeof(ep_cfg_ctrl));
 			ep_cfg_ctrl.ipa_ep_suspend = false;
-			res = ipa3_cfg_ep_ctrl(clnt_hdl, &ep_cfg_ctrl);
+			res = ipa_cfg_ep_ctrl(clnt_hdl, &ep_cfg_ctrl);
 		}
 	}
 
@@ -161,7 +154,7 @@ int ipa3_disable_data_path(u32 clnt_hdl)
 		if (IPA_CLIENT_IS_CONS(ep->client)) {
 			memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
 			ep_cfg_ctrl.ipa_ep_suspend = true;
-			res = ipa3_cfg_ep_ctrl(clnt_hdl, &ep_cfg_ctrl);
+			res = ipa_cfg_ep_ctrl(clnt_hdl, &ep_cfg_ctrl);
 		}
 
 		udelay(IPA_PKT_FLUSH_TO_US);
@@ -453,7 +446,7 @@ int ipa3_smmu_map_peer_buff(u64 iova, u32 size, bool map, struct sg_table *sgt,
 				res = ipa3_iommu_map(smmu_domain, va, phys,
 					len, IOMMU_READ | IOMMU_WRITE);
 				if (res) {
-					IPAERR("Fail to map pa=%pa, va 0x%X\n",
+					IPAERR("Fail to map pa=%pa, va 0x%lX\n",
 						&phys, va);
 					return -EINVAL;
 				}
@@ -484,7 +477,7 @@ int ipa3_smmu_map_peer_buff(u64 iova, u32 size, bool map, struct sg_table *sgt,
 				res = iommu_unmap(smmu_domain, va, len);
 				if (res != len) {
 					IPAERR(
-						"Fail to unmap pa=%pa, va 0x%X, res %d\n"
+						"Fail to unmap pa=%pa, va 0x%lX, res %d\n"
 						, &phys, va, res);
 					ret = -EINVAL;
 				}
@@ -611,7 +604,7 @@ int ipa3_request_gsi_channel(struct ipa_request_gsi_channel_params *params,
 		return -EINVAL;
 	}
 
-	ipa_ep_idx = ipa3_get_ep_mapping(params->client);
+	ipa_ep_idx = ipa_get_ep_mapping(params->client);
 	if (ipa_ep_idx == -1) {
 		IPAERR("fail to alloc EP.\n");
 		goto fail;
@@ -641,11 +634,13 @@ int ipa3_request_gsi_channel(struct ipa_request_gsi_channel_params *params,
 		if (ipa_ep_idx >= ipa3_ctx->ipa_num_pipes ||
 			ipa3_ctx->ep[ipa_ep_idx].valid == 0) {
 			IPAERR("bad parm.\n");
+			IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 			return -EINVAL;
 		}
 		result = ipa3_cfg_ep_cfg(ipa_ep_idx, &params->ipa_ep_cfg.cfg);
 		if (result) {
 			IPAERR("fail to configure QMB.\n");
+			IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 			return result;
 		}
 	}
@@ -701,9 +696,9 @@ int ipa3_request_gsi_channel(struct ipa_request_gsi_channel_params *params,
 		goto write_evt_scratch_fail;
 	}
 
-	gsi_ep_cfg_ptr = ipa3_get_gsi_ep_info(ep->client);
+	gsi_ep_cfg_ptr = ipa_get_gsi_ep_info(ep->client);
 	if (gsi_ep_cfg_ptr == NULL) {
-		IPAERR("Error ipa3_get_gsi_ep_info ret NULL\n");
+		IPAERR("Error ipa_get_gsi_ep_info ret NULL\n");
 		result = -EFAULT;
 		goto write_evt_scratch_fail;
 	}
@@ -807,6 +802,7 @@ int ipa3_set_usb_max_packet_size(
 		&dev_scratch);
 	if (gsi_res != GSI_STATUS_SUCCESS) {
 		IPAERR("Error writing device scratch: %d\n", gsi_res);
+		IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 		return -EFAULT;
 	}
 	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
@@ -895,7 +891,7 @@ int ipa3_xdci_connect(u32 clnt_hdl)
 	goto exit;
 
 stop_ch:
-	(void)ipa3_stop_gsi_channel(clnt_hdl);
+	(void)ipa_stop_gsi_channel(clnt_hdl);
 exit:
 	IPA_ACTIVE_CLIENTS_DEC_EP(ipa3_get_client_mapping(clnt_hdl));
 	return result;
@@ -938,7 +934,7 @@ int ipa3_xdci_start(u32 clnt_hdl, u8 xferrscidx, bool xferrscidx_valid)
 		ep_cfg_ctrl.ipa_ep_delay = true;
 		ep->ep_delay_set = true;
 
-		result = ipa3_cfg_ep_ctrl(clnt_hdl, &ep_cfg_ctrl);
+		result = ipa_cfg_ep_ctrl(clnt_hdl, &ep_cfg_ctrl);
 		if (result)
 			IPAERR("client (ep: %d) failed result=%d\n",
 			clnt_hdl, result);
@@ -959,7 +955,7 @@ int ipa3_xdci_start(u32 clnt_hdl, u8 xferrscidx, bool xferrscidx_valid)
 				HOLB_MONITOR_MASK,
 				holb_max_cnt, IPA_EE_AP);
 		if (result)
-			IPAERR("Add HOLB monitor failed for gsi ch %d\n",
+			IPAERR("Add HOLB monitor failed for gsi ch %lu\n",
 					ep->gsi_chan_hdl);
 	}
 
@@ -969,10 +965,10 @@ int ipa3_xdci_start(u32 clnt_hdl, u8 xferrscidx, bool xferrscidx_valid)
 		gsi_res = gsi_enable_flow_control_ee(ep->gsi_chan_hdl, 0,
 									&code);
 		if (gsi_res == GSI_STATUS_SUCCESS) {
-			IPADBG("flow control sussess gsi ch %d with code %d\n",
+			IPADBG("flow control success gsi ch %lu with code %d\n",
 					ep->gsi_chan_hdl, code);
 		} else {
-			IPADBG("failed to flow control gsi ch %d code %d\n",
+			IPADBG("failed to flow control gsi ch %lu code %d\n",
 					ep->gsi_chan_hdl, code);
 		}
 	}
@@ -1129,7 +1125,7 @@ static int ipa3_xdci_stop_gsi_channel(u32 clnt_hdl, bool *stop_in_proc)
 		return -EINVAL;
 	}
 
-	res = ipa3_stop_gsi_channel(clnt_hdl);
+	res = ipa_stop_gsi_channel(clnt_hdl);
 	if (res != 0 && res != -GSI_STATUS_AGAIN &&
 		res != -GSI_STATUS_TIMED_OUT) {
 		IPAERR("xDCI stop channel failed res=%d\n", res);
@@ -1202,7 +1198,7 @@ int ipa3_remove_secondary_flow_ctrl(int gsi_chan_hdl)
 	if (result == GSI_STATUS_SUCCESS) {
 		code = 0;
 		result = gsi_flow_control_ee(gsi_chan_hdl,
-			ipa3_get_ep_mapping_from_gsi(gsi_chan_hdl), 0, false, true, &code);
+			ipa_get_ep_mapping_from_gsi(gsi_chan_hdl), 0, false, true, &code);
 		if (result == GSI_STATUS_SUCCESS) {
 			IPADBG("flow control sussess ch %d code %d\n",
 					gsi_chan_hdl, code);
@@ -1253,7 +1249,7 @@ static int ipa3_stop_ul_chan_with_data_drain(u32 qmi_req_id,
 	if (remove_delay && ep->ep_delay_set == true && !stop_in_proc) {
 		memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
 		ep_cfg_ctrl.ipa_ep_delay = false;
-		result = ipa3_cfg_ep_ctrl(clnt_hdl,
+		result = ipa_cfg_ep_ctrl(clnt_hdl,
 			&ep_cfg_ctrl);
 		if (result) {
 			IPAERR
@@ -1340,7 +1336,7 @@ exit:
 	if (remove_delay && ep->ep_delay_set == true && !stop_in_proc) {
 		memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
 		ep_cfg_ctrl.ipa_ep_delay = false;
-		result = ipa3_cfg_ep_ctrl(clnt_hdl,
+		result = ipa_cfg_ep_ctrl(clnt_hdl,
 			&ep_cfg_ctrl);
 		if (result) {
 			IPAERR
@@ -1378,7 +1374,7 @@ int ipa3_set_reset_client_prod_pipe_delay(bool set_reset,
 		return -EINVAL;
 	}
 
-	pipe_idx = ipa3_get_ep_mapping(client);
+	pipe_idx = ipa_get_ep_mapping(client);
 
 	if (pipe_idx == IPA_EP_NOT_ALLOCATED) {
 		IPAERR("client (%d) not valid\n", client);
@@ -1391,7 +1387,7 @@ int ipa3_set_reset_client_prod_pipe_delay(bool set_reset,
 	client_lock_unlock_cb(client, true);
 	if (ep->valid && ep->skip_ep_cfg) {
 		ep->ep_delay_set = ep_ctrl.ipa_ep_delay;
-		result = ipa3_cfg_ep_ctrl(pipe_idx, &ep_ctrl);
+		result = ipa_cfg_ep_ctrl(pipe_idx, &ep_ctrl);
 		if (result)
 			IPAERR("client (ep: %d) failed result=%d\n",
 				pipe_idx, result);
@@ -1431,7 +1427,7 @@ int ipa3_start_stop_client_prod_gsi_chnl(enum ipa_client_type client,
 		return -EINVAL;
 	}
 
-	pipe_idx = ipa3_get_ep_mapping(client);
+	pipe_idx = ipa_get_ep_mapping(client);
 
 	if (pipe_idx == IPA_EP_NOT_ALLOCATED) {
 		IPAERR("client (%d) not valid\n", client);
@@ -1447,14 +1443,14 @@ int ipa3_start_stop_client_prod_gsi_chnl(enum ipa_client_type client,
 			result = gsi_enable_flow_control_ee(ep->gsi_chan_hdl,
 								0, &code);
 			if (result == GSI_STATUS_SUCCESS) {
-				IPADBG("flow control sussess ch %d code %d\n",
+				IPADBG("flow control success ch %lu code %d\n",
 						ep->gsi_chan_hdl, code);
 			} else {
-				IPADBG("failed to flow control ch %d code %d\n",
+				IPADBG("failed to flow control ch %lu code %d\n",
 						ep->gsi_chan_hdl, code);
 			}
 		} else
-			result = ipa3_stop_gsi_channel(pipe_idx);
+			result = ipa_stop_gsi_channel(pipe_idx);
 	}
 	client_lock_unlock_cb(client, false);
 	return result;
@@ -1479,7 +1475,7 @@ int ipa3_set_reset_client_cons_pipe_sus_holb(bool set_reset,
 		return -EINVAL;
 	}
 
-	pipe_idx = ipa3_get_ep_mapping(client);
+	pipe_idx = ipa_get_ep_mapping(client);
 
 	if (pipe_idx == IPA_EP_NOT_ALLOCATED) {
 		IPAERR("client (%d) not valid\n", client);
@@ -1542,7 +1538,7 @@ void ipa3_xdci_ep_delay_rm(u32 clnt_hdl)
 			IPA_ACTIVE_CLIENTS_INC_EP
 				(ipa3_get_client_mapping(clnt_hdl));
 
-		result = ipa3_cfg_ep_ctrl(clnt_hdl,
+		result = ipa_cfg_ep_ctrl(clnt_hdl,
 			&ep_cfg_ctrl);
 
 		if (!ep->keep_ipa_awake)
@@ -1600,7 +1596,7 @@ int ipa3_xdci_disconnect(u32 clnt_hdl, bool should_force_clear, u32 qmi_req_id)
 	} else {
 		IPADBG("Stopping CONS channel - hdl=%d clnt=%d\n",
 			clnt_hdl, ep->client);
-		result = ipa3_stop_gsi_channel(clnt_hdl);
+		result = ipa_stop_gsi_channel(clnt_hdl);
 		if (result) {
 			IPAERR("Error stopping channel (CONS client): %d\n",
 				result);
@@ -1610,7 +1606,7 @@ int ipa3_xdci_disconnect(u32 clnt_hdl, bool should_force_clear, u32 qmi_req_id)
 			/* Unsuspend the pipe */
 			memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
 			ep_cfg_ctrl.ipa_ep_suspend = false;
-			ipa3_cfg_ep_ctrl(clnt_hdl, &ep_cfg_ctrl);
+			ipa_cfg_ep_ctrl(clnt_hdl, &ep_cfg_ctrl);
 		}
 	}
 	IPA_ACTIVE_CLIENTS_DEC_EP(ipa3_get_client_mapping(clnt_hdl));
@@ -1777,7 +1773,7 @@ int ipa3_xdci_suspend(u32 ul_clnt_hdl, u32 dl_clnt_hdl,
 		/* Suspend the DL/DPL EP */
 		memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
 		ep_cfg_ctrl.ipa_ep_suspend = true;
-		ipa3_cfg_ep_ctrl(dl_clnt_hdl, &ep_cfg_ctrl);
+		ipa_cfg_ep_ctrl(dl_clnt_hdl, &ep_cfg_ctrl);
 	}
 
 	/*
@@ -1802,7 +1798,7 @@ int ipa3_xdci_suspend(u32 ul_clnt_hdl, u32 dl_clnt_hdl,
 	}
 
 	/* Stop DL channel */
-	result = ipa3_stop_gsi_channel(dl_clnt_hdl);
+	result = ipa_stop_gsi_channel(dl_clnt_hdl);
 	if (result) {
 		IPAERR("Error stopping DL/DPL channel: %d\n", result);
 		result = -EFAULT;
@@ -1835,7 +1831,7 @@ start_dl_and_exit:
 			HOLB_MONITOR_MASK, holb_max_cnt,
 			IPA_EE_AP);
 		if (res)
-			IPAERR("Add HOLB monitor failed for gsi ch %d\n",
+			IPAERR("Add HOLB monitor failed for gsi ch %lu\n",
 					dl_ep->gsi_chan_hdl);
 	}
 	ipa3_start_gsi_debug_monitor(dl_clnt_hdl);
@@ -1851,7 +1847,7 @@ unsuspend_dl_and_exit:
 		/* Unsuspend the DL EP */
 		memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
 		ep_cfg_ctrl.ipa_ep_suspend = false;
-		ipa3_cfg_ep_ctrl(dl_clnt_hdl, &ep_cfg_ctrl);
+		ipa_cfg_ep_ctrl(dl_clnt_hdl, &ep_cfg_ctrl);
 	}
 disable_clk_and_exit:
 	IPA_ACTIVE_CLIENTS_DEC_EP(ipa3_get_client_mapping(dl_clnt_hdl));
@@ -1890,7 +1886,7 @@ int ipa3_start_gsi_channel(u32 clnt_hdl)
 				HOLB_MONITOR_MASK,
 				holb_max_cnt, IPA_EE_AP);
 		if (res)
-			IPAERR("Add HOLB monitor failed for gsi ch %d\n",
+			IPAERR("Add HOLB monitor failed for gsi ch %lu\n",
 					ep->gsi_chan_hdl);
 	}
 	ipa3_start_gsi_debug_monitor(clnt_hdl);
@@ -1938,7 +1934,7 @@ int ipa3_xdci_resume(u32 ul_clnt_hdl, u32 dl_clnt_hdl, bool is_dpl)
 		/* Unsuspend the DL/DPL EP */
 		memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
 		ep_cfg_ctrl.ipa_ep_suspend = false;
-		ipa3_cfg_ep_ctrl(dl_clnt_hdl, &ep_cfg_ctrl);
+		ipa_cfg_ep_ctrl(dl_clnt_hdl, &ep_cfg_ctrl);
 	}
 
 	/* Start DL channel */
@@ -1957,7 +1953,7 @@ int ipa3_xdci_resume(u32 ul_clnt_hdl, u32 dl_clnt_hdl, bool is_dpl)
 				HOLB_MONITOR_MASK,
 				holb_max_cnt, IPA_EE_AP);
 		if (result)
-			IPAERR("Add HOLB monitor failed for gsi ch %d\n",
+			IPAERR("Add HOLB monitor failed for gsi ch %lu\n",
 					dl_ep->gsi_chan_hdl);
 	}
 	ipa3_start_gsi_debug_monitor(dl_clnt_hdl);
@@ -2042,7 +2038,7 @@ int ipa3_clear_endpoint_delay(u32 clnt_hdl)
 	/* If flow is disabled at this point, restore the ep state.*/
 	ep_ctrl.ipa_ep_delay = false;
 	ep_ctrl.ipa_ep_suspend = false;
-	ipa3_cfg_ep_ctrl(clnt_hdl, &ep_ctrl);
+	ipa_cfg_ep_ctrl(clnt_hdl, &ep_ctrl);
 
 	IPA_ACTIVE_CLIENTS_DEC_EP(ipa3_get_client_mapping(clnt_hdl));
 
@@ -2144,44 +2140,14 @@ int ipa3_get_rtk_gsi_stats(struct ipa_uc_dbg_ring_stats *stats)
 {
 	int i;
 	u64 low, high;
-	struct IpaHwRingStats_t *ring = NULL;
-	struct ipa3_uc_dbg_stats *ctx_stats = NULL;
+
 	if (!ipa3_ctx->rtk_ctx.dbg_stats.uc_dbg_stats_mmio)
 		return -EINVAL;
 
 	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
-
-	ctx_stats = &ipa3_ctx->rtk_ctx.dbg_stats;
 	for (i = 0; i < MAX_RTK_CHANNELS; i++) {
-
-		ring = &stats->u.rtk[i].commStats;
-
-		ring->ringFull = ioread32(
-			ctx_stats->uc_dbg_stats_mmio
-			+ i * IPA3_UC_DEBUG_STATS_RTK_OFF +
-			IPA3_UC_DEBUG_STATS_RINGFULL_OFF);
-
-		ring->ringEmpty = ioread32(
-			ctx_stats->uc_dbg_stats_mmio
-			+ i * IPA3_UC_DEBUG_STATS_RTK_OFF +
-			IPA3_UC_DEBUG_STATS_RINGEMPTY_OFF);
-
-		ring->ringUsageHigh = ioread32(
-			ctx_stats->uc_dbg_stats_mmio
-			+ i * IPA3_UC_DEBUG_STATS_RTK_OFF +
-			IPA3_UC_DEBUG_STATS_RINGUSAGEHIGH_OFF);
-
-		ring->ringUsageLow = ioread32(
-			ctx_stats->uc_dbg_stats_mmio
-			+ i * IPA3_UC_DEBUG_STATS_RTK_OFF +
-			IPA3_UC_DEBUG_STATS_RINGUSAGELOW_OFF);
-
-		ring->RingUtilCount = ioread32(
-			ctx_stats->uc_dbg_stats_mmio
-			+ i * IPA3_UC_DEBUG_STATS_RTK_OFF +
-			IPA3_UC_DEBUG_STATS_RINGUTILCOUNT_OFF);
-
-
+		ipa3_get_gsi_ring_stats(&stats->u.rtk[i].commStats,
+			&ipa3_ctx->rtk_ctx.dbg_stats, i);
 		stats->u.rtk[i].trCount = ioread32(
 			ipa3_ctx->rtk_ctx.dbg_stats.uc_dbg_stats_mmio
 			+ i * IPA3_UC_DEBUG_STATS_RTK_OFF +

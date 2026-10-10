@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
+ *
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/debugfs.h>
@@ -235,7 +237,7 @@ static void ecm_ipa_debugfs_destroy(struct ecm_ipa_dev *ecm_ipa_ctx);
 static int ecm_ipa_ep_registers_cfg(u32 usb_to_ipa_hdl, u32 ipa_to_usb_hdl,
 	bool is_vlan_mode);
 static int ecm_ipa_set_device_ethernet_addr
-	(u8 *dev_ethaddr, u8 device_ethaddr[]);
+	(struct net_device *net, u8 device_ethaddr[]);
 static enum ecm_ipa_state ecm_ipa_next_state
 	(enum ecm_ipa_state current_state, enum ecm_ipa_operation operation);
 static const char *ecm_ipa_state_string(enum ecm_ipa_state state);
@@ -330,7 +332,11 @@ int ecm_ipa_init(struct ecm_ipa_params *params)
 		ecm_ipa_ctx->netif_rx_function = netif_receive_skb;
 		ECM_IPA_DEBUG("LAN RX NAPI enabled = True");
 	} else {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0))
 		ecm_ipa_ctx->netif_rx_function = netif_rx_ni;
+#else
+                ecm_ipa_ctx->netif_rx_function = netif_rx;
+#endif
 		ECM_IPA_DEBUG("LAN RX NAPI enabled = False");
 	}
 	ECM_IPA_DEBUG("internal data structures were initialized\n");
@@ -342,7 +348,7 @@ int ecm_ipa_init(struct ecm_ipa_params *params)
 	ecm_ipa_debugfs_init(ecm_ipa_ctx);
 
 	result = ecm_ipa_set_device_ethernet_addr
-		(net->dev_addr, params->device_ethaddr);
+		(net, params->device_ethaddr);
 	if (result) {
 		ECM_IPA_ERROR("set device MAC failed\n");
 		goto fail_set_device_ethernet;
@@ -543,7 +549,7 @@ int ecm_ipa_connect(u32 usb_to_ipa_hdl, u32 ipa_to_usb_hdl, void *priv)
 	memset(&msg_meta, 0, sizeof(struct ipa_msg_meta));
 	msg_meta.msg_type = ECM_CONNECT;
 	msg_meta.msg_len = sizeof(struct ipa_ecm_msg);
-	strlcpy(ecm_msg->name, ecm_ipa_ctx->net->name,
+	strscpy(ecm_msg->name, ecm_ipa_ctx->net->name,
 		IPA_RESOURCE_NAME_MAX);
 	ecm_msg->ifindex = ecm_ipa_ctx->net->ifindex;
 
@@ -846,7 +852,7 @@ int ecm_ipa_disconnect(void *priv)
 	memset(&msg_meta, 0, sizeof(struct ipa_msg_meta));
 	msg_meta.msg_type = ECM_DISCONNECT;
 	msg_meta.msg_len = sizeof(struct ipa_ecm_msg);
-	strlcpy(ecm_msg->name, ecm_ipa_ctx->net->name,
+	strscpy(ecm_msg->name, ecm_ipa_ctx->net->name,
 		IPA_RESOURCE_NAME_MAX);
 	ecm_msg->ifindex = ecm_ipa_ctx->net->ifindex;
 
@@ -953,7 +959,7 @@ static void ecm_ipa_prepare_header_insertion(
 	ECM_IPA_LOG_ENTRY();
 
 	add_hdr->is_partial = 0;
-	strlcpy(add_hdr->name, hdr_name, IPA_RESOURCE_NAME_MAX);
+	strscpy(add_hdr->name, hdr_name, IPA_RESOURCE_NAME_MAX);
 	add_hdr->is_eth2_ofst_valid = true;
 	add_hdr->eth2_ofst = 0;
 
@@ -992,7 +998,7 @@ static int ecm_ipa_hdrs_hpc_cfg(struct ecm_ipa_dev *ecm_ipa_ctx)
 		goto fail_mem;
 	}
 	empty_hdr = &hdrs->hdr[0];
-	strlcpy(empty_hdr->name, EMPTY_HDR_NAME, sizeof(empty_hdr->name));
+	strscpy(empty_hdr->name, EMPTY_HDR_NAME, sizeof(empty_hdr->name));
 	empty_hdr->hdr_len = 0;
 	empty_hdr->hdr_hdl = -1;
 	empty_hdr->is_partial = false;
@@ -1014,7 +1020,7 @@ static int ecm_ipa_hdrs_hpc_cfg(struct ecm_ipa_dev *ecm_ipa_ctx)
 
 	ecm_ipa_ctx->empty_hdr_hdl = empty_hdr->hdr_hdl;
 	lookup.ep = IPA_CLIENT_USB_CONS;
-	strlcpy(lookup.name, EMPTY_HDR_NAME, sizeof(lookup.name));
+	strscpy(lookup.name, EMPTY_HDR_NAME, sizeof(lookup.name));
 	if (ipa_set_pkt_init_ex_hdr_ofst(&lookup, true))
 		goto fail_add_hdr;
 
@@ -1061,7 +1067,7 @@ static int ecm_ipa_rules_cfg(struct ecm_ipa_dev *ecm_ipa_ctx,
 
 	hdrs->commit = 1;
 	hdrs->num_hdrs = 2;
-	result = ipa3_add_hdr(hdrs);
+	result = ipa_add_hdr(hdrs);
 	if (result) {
 		ECM_IPA_ERROR("Fail on Header-Insertion(%d)\n", result);
 		goto out_free_mem;
@@ -1114,9 +1120,9 @@ static void ecm_ipa_rules_destroy(struct ecm_ipa_dev *ecm_ipa_ctx)
 	ipv6 = &del_hdr->hdl[1];
 	ipv6->hdl = ecm_ipa_ctx->eth_ipv6_hdr_hdl;
 
-	result = ipa3_del_hdr(del_hdr);
+	result = ipa_del_hdr(del_hdr);
 	if (result || ipv4->status || ipv6->status)
-		ECM_IPA_ERROR("ipa3_del_hdr failed\n");
+		ECM_IPA_ERROR("ipa_del_hdr failed\n");
 	kfree(del_hdr);
 }
 
@@ -1151,7 +1157,7 @@ static int ecm_ipa_register_properties(struct ecm_ipa_dev *ecm_ipa_ctx)
 	ipv4_property = &tx_properties.prop[0];
 	ipv4_property->ip = IPA_IP_v4;
 	ipv4_property->dst_pipe = ecm_ipa_ctx->ipa_to_usb_client;
-	strlcpy
+	strscpy
 		(ipv4_property->hdr_name, ECM_IPA_IPV4_HDR_NAME,
 		IPA_RESOURCE_NAME_MAX);
 	ipv4_property->hdr_l2_type = hdr_l2_type;
@@ -1159,7 +1165,7 @@ static int ecm_ipa_register_properties(struct ecm_ipa_dev *ecm_ipa_ctx)
 	ipv6_property->ip = IPA_IP_v6;
 	ipv6_property->dst_pipe = ecm_ipa_ctx->ipa_to_usb_client;
 	ipv6_property->hdr_l2_type = hdr_l2_type;
-	strlcpy
+	strscpy
 		(ipv6_property->hdr_name, ECM_IPA_IPV6_HDR_NAME,
 		IPA_RESOURCE_NAME_MAX);
 	tx_properties.num_props = 2;
@@ -1177,7 +1183,7 @@ static int ecm_ipa_register_properties(struct ecm_ipa_dev *ecm_ipa_ctx)
 	rx_ipv6_property->hdr_l2_type = hdr_l2_type;
 	rx_properties.num_props = 2;
 
-	result = ipa3_register_intf("ecm0", &tx_properties, &rx_properties);
+	result = ipa_register_intf("ecm0", &tx_properties, &rx_properties);
 	if (result)
 		ECM_IPA_ERROR("fail on Tx/Rx properties registration\n");
 
@@ -1191,7 +1197,7 @@ static void ecm_ipa_deregister_properties(void)
 	int result;
 
 	ECM_IPA_LOG_ENTRY();
-	result = ipa3_deregister_intf("ecm0");
+	result = ipa_deregister_intf("ecm0");
 	if (result)
 		ECM_IPA_DEBUG("Fail on Tx prop deregister\n");
 	ECM_IPA_LOG_EXIT();
@@ -1507,12 +1513,18 @@ out:
  * Returns 0 for success, negative otherwise
  */
 static int ecm_ipa_set_device_ethernet_addr
-	(u8 *dev_ethaddr, u8 device_ethaddr[])
+	(struct net_device *net, u8 device_ethaddr[])
 {
 	if (!is_valid_ether_addr(device_ethaddr))
 		return -EINVAL;
-	memcpy(dev_ethaddr, device_ethaddr, ETH_ALEN);
-	ECM_IPA_DEBUG("device ethernet address: %pM\n", dev_ethaddr);
+
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(5, 15, 0))
+	net->addr_len = ETH_ALEN;
+	dev_addr_set(net, device_ethaddr);
+#else
+	memcpy((u8 *)net->dev_addr, device_ethaddr, ETH_ALEN);
+	ECM_IPA_DEBUG("device ethernet address: %pM\n", (u8 *)net->dev_addr);
+#endif
 	return 0;
 }
 

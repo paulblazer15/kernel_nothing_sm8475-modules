@@ -2,7 +2,7 @@
 DATAIPADRVTOP = $(srctree)/techpack/dataipa/drivers/platform/msm
 
 #MSMs - GKI
-ifeq ($(filter $(CONFIG_ARCH_LAHAINA) $(CONFIG_ARCH_HOLI), y),y)
+ifeq ($(CONFIG_ARCH_LAHAINA), y)
 LINUXINCLUDE    += -include $(srctree)/techpack/dataipa/config/dataipa.h
 ifeq ($(CONFIG_QGKI),y)
 include $(srctree)/techpack/dataipa/config/dataipa_QGKI.conf
@@ -15,27 +15,23 @@ include $(srctree)/techpack/dataipa/config/dataipa_GKI.conf
 endif
 endif
 
-
 #MSM - Vendor SI
-ifeq ($(CONFIG_ARCH_PARROT), y)
+ifeq ($(filter $(CONFIG_ARCH_WAIPIO) $(CONFIG_ARCH_KALAMA) $(CONFIG_ARCH_PINEAPPLE) $(CONFIG_ARCH_CLIFFS) $(CONFIG_ARCH_PARROT), y),y)
 DATAIPADRVTOP = $(srctree)/../sm8475-modules/qcom/opensource/dataipa/drivers/platform/msm
 LINUXINCLUDE    += -include $(srctree)/../sm8475-modules/qcom/opensource/dataipa/config/dataipa_vendor.h
 include $(srctree)/../sm8475-modules/qcom/opensource/dataipa/config/dataipa_GKI.conf
 ifeq ($(CONFIG_LOCALVERSION), "-gki-consolidate")
-include $(srctree)/../sm8475-modules/qcom/opensource/dataipa/config/dataipa_debug.conf
+include $(srctree)/../sm8475-modules/qcom/opensource/dataipa/config/dataipa_GKI_consolidate.conf
 LINUXINCLUDE    += -include $(srctree)/../sm8475-modules/qcom/opensource/dataipa/config/dataipa_debug.h
 endif
 endif
 
-
-
-#MSM - Vendor SI
-ifeq ($(CONFIG_ARCH_WAIPIO), y)
+ifeq ($(filter $(CONFIG_ARCH_KHAJE) $(CONFIG_ARCH_BLAIR) $(CONFIG_ARCH_HOLI) $(CONFIG_ARCH_MONACO), y), y)
 DATAIPADRVTOP = $(srctree)/../sm8475-modules/qcom/opensource/dataipa/drivers/platform/msm
-LINUXINCLUDE    += -include $(srctree)/../sm8475-modules/qcom/opensource/dataipa/config/dataipa_vendor.h
-include $(srctree)/../sm8475-modules/qcom/opensource/dataipa/config/dataipa_GKI.conf
+LINUXINCLUDE    += -include $(srctree)/../sm8475-modules/qcom/opensource/dataipa/config/dataipa_vendor_ipav4.h
+include $(srctree)/../sm8475-modules/qcom/opensource/dataipa/config/dataipa_GKI_ipav4.conf
 ifeq ($(CONFIG_LOCALVERSION), "-gki-consolidate")
-include $(srctree)/../sm8475-modules/qcom/opensource/dataipa/config/dataipa_debug.conf
+include $(srctree)/../sm8475-modules/qcom/opensource/dataipa/config/dataipa_GKI_consolidate.conf
 LINUXINCLUDE    += -include $(srctree)/../sm8475-modules/qcom/opensource/dataipa/config/dataipa_debug.h
 endif
 endif
@@ -60,35 +56,8 @@ endif
 endif
 
 ifeq ($(CONFIG_ARCH_SCUBA), y)
-LINUXINCLUDE    += -include $(srctree)/techpack/dataipa/config/auto_dataipa.h
-include $(srctree)/techpack/dataipa/config/auto_dataipa_QGKI.conf
-ifneq ($(CONFIG_LOCALVERSION), "-perf")
-include $(srctree)/techpack/dataipa/config/dataipa_debug.conf
-LINUXINCLUDE    += -include $(srctree)/techpack/dataipa/config/dataipa_debug.h
-endif
-endif
-
-ifeq ($(CONFIG_ARCH_SA515M), y)
-LINUXINCLUDE    += -include $(srctree)/techpack/dataipa/config/auto_dataipa.h
-include $(srctree)/techpack/dataipa/config/auto_dataipa_QGKI.conf
-ifneq ($(CONFIG_LOCALVERSION), "-perf")
-include $(srctree)/techpack/dataipa/config/dataipa_debug.conf
-LINUXINCLUDE    += -include $(srctree)/techpack/dataipa/config/dataipa_debug.h
-endif
-endif
-
-ifeq ($(CONFIG_ARCH_SA415M), y)
-LINUXINCLUDE    += -include $(srctree)/techpack/dataipa/config/auto_dataipa.h
-include $(srctree)/techpack/dataipa/config/auto_dataipa_QGKI.conf
-ifneq ($(CONFIG_LOCALVERSION), "-perf")
-include $(srctree)/techpack/dataipa/config/dataipa_debug.conf
-LINUXINCLUDE    += -include $(srctree)/techpack/dataipa/config/dataipa_debug.h
-endif
-endif
-
-ifeq ($(CONFIG_ARCH_KHAJE), y)
-LINUXINCLUDE    += -include $(srctree)/techpack/dataipa/config/dataipa.h
-include $(srctree)/techpack/dataipa/config/dataipa_QGKI.conf
+LINUXINCLUDE    += -include $(srctree)/techpack/dataipa/config/sa410mdataipa.h
+include $(srctree)/techpack/dataipa/config/sa410mdataipa_QGKI.conf
 ifneq ($(CONFIG_LOCALVERSION), "-perf")
 include $(srctree)/techpack/dataipa/config/dataipa_debug.conf
 LINUXINCLUDE    += -include $(srctree)/techpack/dataipa/config/dataipa_debug.h
@@ -96,12 +65,16 @@ endif
 endif
 
 ifneq (,$(filter $(CONFIG_IPA3) $(CONFIG_GSI),y m))
+LINUXINCLUDE := -I$(DATAIPADRVTOP)/include $(LINUXINCLUDE)
+LINUXINCLUDE += -I$(DATAIPADRVTOP)/include/linux
+LINUXINCLUDE += -I$(DATAIPADRVTOP)/include/uapi
 LINUXINCLUDE += -I$(DATAIPADRVTOP)/gsi
 LINUXINCLUDE += -I$(DATAIPADRVTOP)/gsi/gsihal
 LINUXINCLUDE += -I$(DATAIPADRVTOP)/ipa
 LINUXINCLUDE += -I$(DATAIPADRVTOP)/ipa/ipa_v3
 LINUXINCLUDE += -I$(DATAIPADRVTOP)/ipa/ipa_v3/ipahal
 LINUXINCLUDE += -I$(DATAIPADRVTOP)/ipa/ipa_clients
+LINUXINCLUDE += -I$(srctree)/../sm8475-modules/qcom/opensource/datarmnet/mem
 ifneq (,$(filter $(CONFIG_IPA_KERNEL_TESTS_MODULE),y m))
 LINUXINCLUDE += -I$(DATAIPADRVTOP)/ipa/ipa_test_module
 endif
@@ -117,6 +90,10 @@ endif
 
 ifneq (,$(filter $(CONFIG_IPA3_REGDUMP_IPA_5_0),y m))
 LINUXINCLUDE += -I$(DATAIPADRVTOP)/ipa/ipa_v3/dump/ipa5.0
+endif
+
+ifneq (,$(filter $(CONFIG_IPA3_REGDUMP_IPA_5_5),y m))
+LINUXINCLUDE += -I$(DATAIPADRVTOP)/ipa/ipa_v3/dump/ipa5.5
 endif
 
 

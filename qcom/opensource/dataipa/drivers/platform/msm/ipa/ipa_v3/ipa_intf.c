@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ *
+ * Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/fs.h>
@@ -48,12 +49,12 @@ struct ipa3_pull_msg {
  *
  * Note:	Should not be called from atomic context
  */
-int ipa3_register_intf(const char *name, const struct ipa_tx_intf *tx,
+int ipa_register_intf(const char *name, const struct ipa_tx_intf *tx,
 		       const struct ipa_rx_intf *rx)
 {
 	return ipa3_register_intf_ext(name, tx, rx, NULL);
 }
-EXPORT_SYMBOL(ipa3_register_intf);
+EXPORT_SYMBOL(ipa_register_intf);
 
 /**
  * ipa3_register_intf_ext() - register "logical" interface which has only
@@ -106,7 +107,7 @@ int ipa3_register_intf_ext(const char *name, const struct ipa_tx_intf *tx,
 	if (intf == NULL)
 		return -ENOMEM;
 
-	strlcpy(intf->name, name, IPA_RESOURCE_NAME_MAX);
+	strscpy(intf->name, name, IPA_RESOURCE_NAME_MAX);
 
 	if (tx) {
 		intf->num_tx_props = tx->num_props;
@@ -156,7 +157,7 @@ int ipa3_register_intf_ext(const char *name, const struct ipa_tx_intf *tx,
 }
 
 /**
- * ipa3_deregister_intf() - de-register previously registered logical interface
+ * ipa_deregister_intf() - de-register previously registered logical interface
  * @name: [in] interface name
  *
  * De-register a previously registered interface
@@ -165,7 +166,7 @@ int ipa3_register_intf_ext(const char *name, const struct ipa_tx_intf *tx,
  *
  * Note:	Should not be called from atomic context
  */
-int ipa3_deregister_intf(const char *name)
+int ipa_deregister_intf(const char *name)
 {
 	struct ipa3_intf *entry;
 	struct ipa3_intf *next;
@@ -193,7 +194,7 @@ int ipa3_deregister_intf(const char *name)
 
 	return result;
 }
-EXPORT_SYMBOL(ipa3_deregister_intf);
+EXPORT_SYMBOL(ipa_deregister_intf);
 
 /**
  * ipa3_query_intf() - query logical interface properties
@@ -377,7 +378,7 @@ int ipa3_query_intf_ext_props(struct ipa_ioc_query_intf_ext_props *ext)
 	return result;
 }
 
-static void ipa3_send_msg_free(void *buff, u32 len, u32 type)
+static void ipa_send_msg_free(void *buff, u32 len, u32 type)
 {
 	kfree(buff);
 }
@@ -397,7 +398,7 @@ static int wlan_msg_process(struct ipa_msg_meta *meta, void *buff)
 
 	if (!buff)
 		return -EINVAL;
-	if (WLAN_IPA_CONNECT_EVENT(meta->msg_type)) {
+	if (meta->msg_type == WLAN_CLIENT_CONNECT_EX) {
 		/* debug print */
 		event_ex_cur_con = buff;
 		for (cnt = 0; cnt < event_ex_cur_con->num_of_attribs; cnt++) {
@@ -411,9 +412,6 @@ static int wlan_msg_process(struct ipa_msg_meta *meta, void *buff)
 				event_ex_cur_con->attribs[cnt].u.mac_addr[4],
 				event_ex_cur_con->attribs[cnt].u.mac_addr[5],
 				meta->msg_type);
-			} else if (event_ex_cur_con->attribs[cnt].attrib_type ==
-				WLAN_HDR_ATTRIB_TA_PEER_ID) {
-				IPADBG("TA_PEER_ID: %d\n", event_ex_cur_con->attribs[cnt].u.ta_peer_id);
 			}
 		}
 
@@ -433,7 +431,7 @@ static int wlan_msg_process(struct ipa_msg_meta *meta, void *buff)
 			}
 			memcpy(data_dup, buff, meta->msg_len);
 			msg_dup->buff = data_dup;
-			msg_dup->callback = ipa3_send_msg_free;
+			msg_dup->callback = ipa_send_msg_free;
 		} else {
 			IPAERR("msg_len %d\n", meta->msg_len);
 			kfree(msg_dup);
@@ -445,7 +443,7 @@ static int wlan_msg_process(struct ipa_msg_meta *meta, void *buff)
 	}
 
 	/* remove the cache */
-	if (WLAN_IPA_DISCONNECT_EVENT(meta->msg_type)) {
+	if (meta->msg_type == WLAN_CLIENT_DISCONNECT) {
 		/* debug print */
 		event_ex_cur_discon = buff;
 		IPADBG("Mac %pM, msg %d\n",
@@ -486,86 +484,8 @@ static int wlan_msg_process(struct ipa_msg_meta *meta, void *buff)
 	return 0;
 }
 
-static int lan_msg_process(struct ipa_msg_meta *meta, void *buff)
-{
-	struct ipa3_push_msg *msg_dup = NULL;
-	struct ipa_ecm_msg *ecm_msg_con = NULL;
-	struct ipa_ecm_msg *ecm_event_list = NULL;
-	struct ipa_ecm_msg *ecm_msg_discon = NULL;
-	struct ipa3_push_msg *entry;
-	struct ipa3_push_msg *next;
-	void *data_dup = NULL;
-	int iface_index = 0;
-
-	if (!buff)
-		return -EINVAL;
-
-	if (meta->msg_type == ECM_CONNECT) {
-		/*debug print */
-		ecm_msg_con = buff;
-		IPADBG("ifindex: %d\n", ecm_msg_con->ifindex);
-		IPADBG("interface name: %s\n", ecm_msg_con->name);
-
-		mutex_lock(&ipa3_ctx->msg_lan_lock);
-		if (meta->msg_len > 0 && buff) {
-
-			msg_dup = kzalloc(sizeof(*msg_dup), GFP_KERNEL);
-			if (msg_dup == NULL) {
-				mutex_unlock(&ipa3_ctx->msg_lan_lock);
-				return -ENOMEM;
-			}
-
-			msg_dup->meta = *meta;
-			data_dup = kmalloc(meta->msg_len, GFP_KERNEL);
-			if (data_dup == NULL) {
-				kfree(msg_dup);
-				mutex_unlock(&ipa3_ctx->msg_lan_lock);
-				return -ENOMEM;
-			}
-			memcpy(data_dup, buff, meta->msg_len);
-			msg_dup->buff = data_dup;
-			msg_dup->callback = ipa3_send_msg_free;
-		} else {
-			IPAERR("msg_len %d\n", meta->msg_len);
-			mutex_unlock(&ipa3_ctx->msg_lan_lock);
-			return -EINVAL;
-		}
-		list_add_tail(&msg_dup->link, &ipa3_ctx->msg_lan_list);
-		mutex_unlock(&ipa3_ctx->msg_lan_lock);
-	}
-
-	/* remove the cache */
-	if (meta->msg_type == ECM_DISCONNECT) {
-		/* debug print */
-		ecm_msg_discon = buff;
-		iface_index = ecm_msg_discon->ifindex;
-
-		IPADBG("ifindex: %d\n", ecm_msg_discon->ifindex);
-		IPADBG("interface name: %s\n", ecm_msg_discon->name);
-
-		mutex_lock(&ipa3_ctx->msg_lan_lock);
-		list_for_each_entry_safe(entry, next,
-			&ipa3_ctx->msg_lan_list, link) {
-			ecm_event_list = entry->buff;
-
-			/* compare to delete one*/
-			if (iface_index == ecm_event_list->ifindex) {
-				IPADBG("Delete event for iface index: %d\n",
-				iface_index);
-				list_del(&entry->link);
-				kfree(entry);
-			}
-		}
-
-		mutex_unlock(&ipa3_ctx->msg_lan_lock);
-
-	}
-
-	return 0;
-}
-
 /**
- * ipa3_send_msg() - Send "message" from kernel client to IPA driver
+ * ipa_send_msg() - Send "message" from kernel client to IPA driver
  * @meta: [in] message meta-data
  * @buff: [in] the payload for message
  * @callback: [in] free callback
@@ -579,7 +499,7 @@ static int lan_msg_process(struct ipa_msg_meta *meta, void *buff)
  *
  * Note:	Should not be called from atomic context
  */
-int ipa3_send_msg(struct ipa_msg_meta *meta, void *buff,
+int ipa_send_msg(struct ipa_msg_meta *meta, void *buff,
 		  ipa_msg_free_fn callback)
 {
 	struct ipa3_push_msg *msg;
@@ -597,6 +517,14 @@ int ipa3_send_msg(struct ipa_msg_meta *meta, void *buff,
 		return -EINVAL;
 	}
 
+	if (ipa3_ctx->ipa_wdi_opt_dpath && WLAN_IPA_EVENT(meta->msg_type)) {
+		IPAERR_RL("Opt data path enabled, ignore message type %d\n",
+			meta->msg_type);
+		if (buff)
+			callback(buff, meta->msg_len, meta->msg_type);
+		return 0;
+	}
+
 	msg = kzalloc(sizeof(struct ipa3_push_msg), GFP_KERNEL);
 	if (msg == NULL)
 		return -ENOMEM;
@@ -609,7 +537,7 @@ int ipa3_send_msg(struct ipa_msg_meta *meta, void *buff,
 			return -ENOMEM;
 		}
 		msg->buff = data;
-		msg->callback = ipa3_send_msg_free;
+		msg->callback = ipa_send_msg_free;
 	}
 
 	mutex_lock(&ipa3_ctx->msg_lock);
@@ -617,9 +545,6 @@ int ipa3_send_msg(struct ipa_msg_meta *meta, void *buff,
 	/* support for softap client event cache */
 	if (wlan_msg_process(meta, buff))
 		IPAERR_RL("wlan_msg_process failed\n");
-
-	if (lan_msg_process(meta, buff))
-		IPAERR_RL("lan_msg_process failed\n");
 
 	/* unlock only after process */
 	mutex_unlock(&ipa3_ctx->msg_lock);
@@ -631,12 +556,12 @@ int ipa3_send_msg(struct ipa_msg_meta *meta, void *buff,
 
 	return 0;
 }
+EXPORT_SYMBOL(ipa_send_msg);
 
 /**
  * ipa3_resend_wlan_msg() - Resend cached "message" to IPACM
  *
- * resend wlan client connect/AP_CONNECT/STA_CONNECT events to 
- * user-space
+ * resend wlan client connect events to user-space
  *
  * Returns:	0 on success, negative on failure
  *
@@ -679,7 +604,7 @@ int ipa3_resend_wlan_msg(void)
 			return -ENOMEM;
 		}
 		msg->buff = data;
-		msg->callback = ipa3_send_msg_free;
+		msg->callback = ipa_send_msg_free;
 		mutex_lock(&ipa3_ctx->msg_lock);
 		list_add_tail(&msg->link, &ipa3_ctx->msg_list);
 		mutex_unlock(&ipa3_ctx->msg_lock);
@@ -689,114 +614,6 @@ int ipa3_resend_wlan_msg(void)
 	}
 	mutex_unlock(&ipa3_ctx->msg_wlan_client_lock);
 	return 0;
-}
-
-/**
- * ipa3_resend_lan_msg() - Resend cached "message" to IPACM
- *
- * resend ecm connect/disconnect events to user-space
- *
- * Returns:     0 on success, negative on failure
- *
- * Note:        Should not be called from atomic context
- */
-
-int ipa3_resend_lan_msg(void)
-{
-	struct ipa3_push_msg *entry = NULL;
-	struct ipa3_push_msg *next = NULL;
-	struct ipa_ecm_msg *ecm_msg = NULL;
-	struct ipa3_push_msg *msg = NULL;
-	void *data = NULL;
-
-	IPADBG("\n");
-	mutex_lock(&ipa3_ctx->msg_lan_lock);
-	list_for_each_entry_safe(entry, next, &ipa3_ctx->msg_lan_list, link) {
-		ecm_msg = entry->buff;
-
-		IPADBG("ifindex: %d\n", ecm_msg->ifindex);
-		IPADBG("interface name: %s\n", ecm_msg->name);
-
-		msg = kzalloc(sizeof(*msg), GFP_KERNEL);
-		if (msg == NULL) {
-			mutex_unlock(&ipa3_ctx->msg_lan_lock);
-			return -ENOMEM;
-		}
-		msg->meta = entry->meta;
-		data = kzalloc(entry->meta.msg_len, GFP_KERNEL);
-		if (data == NULL) {
-			kfree(msg);
-			mutex_unlock(&ipa3_ctx->msg_lan_lock);
-			return -ENOMEM;
-		}
-		memcpy(data, entry->buff, entry->meta.msg_len);
-		msg->buff = data;
-		msg->callback = ipa3_send_msg_free;
-		mutex_lock(&ipa3_ctx->msg_lock);
-		list_add_tail(&msg->link, &ipa3_ctx->msg_list);
-		mutex_unlock(&ipa3_ctx->msg_lock);
-		wake_up(&ipa3_ctx->msg_waitq);
-	}
-	mutex_unlock(&ipa3_ctx->msg_lan_lock);
-
-	return 0;
-}
-
-/*
- * ipa3_send_done_restore_msg() - Resend done_restore_msg to IPACM
- *
- * Returns:     0 on success, negative on failure
- *
- * Note:        Should not be called from atomic context
- *
- */
-
-static int ipa3_send_done_restore_msg(void)
-{
-	struct ipa3_push_msg *msg = NULL;
-
-	IPADBG("\n");
-
-	msg = kzalloc(sizeof(*msg), GFP_KERNEL);
-	if (msg == NULL)
-		return -ENOMEM;
-	msg->meta.msg_type = IPA_DONE_RESTORE_EVENT;
-	msg->buff = NULL;
-	msg->callback = ipa3_send_msg_free;
-
-	mutex_lock(&ipa3_ctx->msg_lock);
-	list_add_tail(&msg->link, &ipa3_ctx->msg_list);
-	mutex_unlock(&ipa3_ctx->msg_lock);
-	wake_up(&ipa3_ctx->msg_waitq);
-
-	return 0;
-}
-
-/*
- * ipa3_resend_driver_msg() - Resend done_restore_msg to IPACM
- *
- * Returns:     0 on success, negative on failure
- *
- */
-
-int ipa3_resend_driver_msg(void)
-{
-	int retval = 0;
-	IPADBG("resend wlan msg\n");
-	retval = ipa3_resend_wlan_msg();
-	if (retval)
-		goto fail;
-
-	IPADBG("resend lan msg\n");
-	retval = ipa3_resend_lan_msg();
-	if (retval)
-		goto fail;
-
-	IPADBG("send IPA_DONE_RESTORE_EVENT\n");
-	retval = ipa3_send_done_restore_msg();
-
-fail:
-	return retval;
 }
 
 /**
@@ -914,12 +731,6 @@ ssize_t ipa3_read(struct file *filp, char __user *buf, size_t count,
 		if (msg) {
 			locked = 0;
 			mutex_unlock(&ipa3_ctx->msg_lock);
-			if (count < sizeof(struct ipa_msg_meta)) {
-				kfree(msg);
-				msg = NULL;
-				ret = -EFAULT;
-				break;
-			}
 			if (copy_to_user(buf, &msg->meta,
 					  sizeof(struct ipa_msg_meta))) {
 				ret = -EFAULT;
@@ -930,18 +741,8 @@ ssize_t ipa3_read(struct file *filp, char __user *buf, size_t count,
 			buf += sizeof(struct ipa_msg_meta);
 			count -= sizeof(struct ipa_msg_meta);
 			if (msg->buff) {
-				if (count >= msg->meta.msg_len) {
-					if (copy_to_user(buf, msg->buff,
-							msg->meta.msg_len)) {
-						IPAERR_RL("Failed to copy the data to userspace\n");
-						msg->callback(msg->buff, msg->meta.msg_len,
-						msg->meta.msg_type);
-						ret = -EFAULT;
-						kfree(msg);
-						msg = NULL;
-						break;
-					}
-				} else {
+				if (copy_to_user(buf, msg->buff,
+						  msg->meta.msg_len)) {
 					ret = -EFAULT;
 					kfree(msg);
 					msg = NULL;

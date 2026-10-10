@@ -1,18 +1,17 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: GPL-2.0-only WITH Linux-syscall-note
 /*
 * Copyright (c) 2017-2018,2020-2021, The Linux Foundation. All rights reserved.
-*
 * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
 */
 
 #ifndef _IPA_TEST_MODULE_H_
 #define _IPA_TEST_MODULE_H_
 
-#include <stddef.h>
+#include <linux/stddef.h>
 #include <linux/msm_ipa.h>
 #include <linux/ioctl.h>
 #ifdef _KERNEL_
-#include <linux/ipa.h>
+#include "ipa.h"
 #endif
 
 #define IPA_TEST_IOC_MAGIC 0xA5
@@ -218,7 +217,5 @@ struct ipa_test_mem_partition {
 
 	unsigned stats_drop_ofst;
 	unsigned stats_drop_size;
-	unsigned q6_stats_drop_ofst;
-	unsigned q6_stats_drop_size;
 };
 #endif /* _IPA_TEST_MODULE_H_ */

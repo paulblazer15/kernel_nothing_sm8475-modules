@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/debugfs.h>
@@ -670,7 +671,7 @@ int ipa_pm_init(struct ipa_pm_init_params *params)
 
 	/* Populate exception list*/
 	for (i = 0; i < params->exception_size; i++) {
-		strlcpy(clk_scaling->exception_list[i].clients,
+		strscpy(clk_scaling->exception_list[i].clients,
 			params->exceptions[i].usecase, IPA_PM_MAX_EX_CL);
 		IPA_PM_DBG("Usecase: %s\n", params->exceptions[i].usecase);
 
@@ -699,7 +700,7 @@ int ipa_pm_init(struct ipa_pm_init_params *params)
 	/*Adding ipa3_ctx pointer to minidump list*/
 	mini_dump = (struct ipa_minidump_data *)kzalloc(sizeof(struct ipa_minidump_data), GFP_KERNEL);
 	if (mini_dump != NULL) {
-		strlcpy(mini_dump->data.owner, "ipa_pm_ctx", sizeof(mini_dump->data.owner));
+		strscpy(mini_dump->data.owner, "ipa_pm_ctx", sizeof(mini_dump->data.owner));
 		mini_dump->data.vaddr = (unsigned long)(ipa_pm_ctx);
 		mini_dump->data.size = sizeof(*ipa_pm_ctx);
 		list_add(&mini_dump->entry, &ipa3_ctx->minidump_list_head);
@@ -783,7 +784,7 @@ int ipa_pm_register(struct ipa_pm_register_params *params, u32 *hdl)
 	INIT_WORK(&client->activate_work, activate_work_func);
 
 	/* populate fields */
-	strlcpy(client->name, params->name, IPA_PM_MAX_EX_CL);
+	strscpy(client->name, params->name, IPA_PM_MAX_EX_CL);
 	client->callback = params->callback;
 	client->callback_params = params->user_data;
 	client->group = params->group;
@@ -791,9 +792,9 @@ int ipa_pm_register(struct ipa_pm_register_params *params, u32 *hdl)
 	client->skip_clk_vote = params->skip_clk_vote;
 	client->wlock = wakeup_source_register(NULL, client->name);
 	if (!client->wlock) {
-		ipa_pm_deregister(*hdl);
 		IPA_PM_ERR("IPA wakeup source register failed %s\n",
 			client->name);
+		ipa_pm_deregister(*hdl);
 		return -ENOMEM;
 	}
 
@@ -905,7 +906,7 @@ int ipa_pm_associate_ipa_cons_to_client(u32 hdl, enum ipa_client_type consumer)
 		return -EPERM;
 	}
 
-	idx = ipa3_get_ep_mapping(consumer);
+	idx = ipa_get_ep_mapping(consumer);
 
 	if (idx < 0) {
 		mutex_unlock(&ipa_pm_ctx->client_mutex);
@@ -952,9 +953,12 @@ static int ipa_pm_activate_helper(struct ipa_pm_client *client, bool sync)
 
 	switch (client->state) {
 	case IPA_PM_ACTIVATED_PENDING_RESCHEDULE:
+		fallthrough;
 	case IPA_PM_ACTIVATED_PENDING_DEACTIVATION:
 		client->state = IPA_PM_ACTIVATED_TIMER_SET;
+		fallthrough;
 	case IPA_PM_ACTIVATED:
+		fallthrough;
 	case IPA_PM_ACTIVATED_TIMER_SET:
 		spin_unlock_irqrestore(&client->state_lock, flags);
 		return 0;
@@ -1080,6 +1084,7 @@ int ipa_pm_deferred_deactivate(u32 hdl)
 	switch (client->state) {
 	case IPA_PM_ACTIVATE_IN_PROGRESS:
 		client->state = IPA_PM_DEACTIVATE_IN_PROGRESS;
+		fallthrough;
 	case IPA_PM_DEACTIVATED:
 		IPA_PM_DBG_STATE(hdl, client->name, client->state);
 		spin_unlock_irqrestore(&client->state_lock, flags);
@@ -1095,12 +1100,16 @@ int ipa_pm_deferred_deactivate(u32 hdl)
 			msecs_to_jiffies(delay));
 		break;
 	case IPA_PM_ACTIVATED_TIMER_SET:
+		fallthrough;
 	case IPA_PM_ACTIVATED_PENDING_DEACTIVATION:
 		client->state = IPA_PM_ACTIVATED_PENDING_RESCHEDULE;
+		fallthrough;
 	case IPA_PM_DEACTIVATE_IN_PROGRESS:
+		fallthrough;
 	case IPA_PM_ACTIVATED_PENDING_RESCHEDULE:
 		break;
 	case IPA_PM_STATE_MAX:
+		fallthrough;
 	default:
 		IPA_PM_ERR("Bad State");
 		spin_unlock_irqrestore(&client->state_lock, flags);
@@ -1249,6 +1258,7 @@ int ipa_pm_handle_suspend(u32 pipe_bitmask, u32 pipe_arr_idx)
 	bool client_notified[IPA_PM_MAX_CLIENTS] = { false };
 	u32 pipe_add;
 	u32 max_pipes;
+	enum ipa_client_type type;
 
 	if (ipa_pm_ctx == NULL) {
 		IPA_PM_ERR("PM_ctx is null\n");
@@ -1265,6 +1275,9 @@ int ipa_pm_handle_suspend(u32 pipe_bitmask, u32 pipe_arr_idx)
 	mutex_lock(&ipa_pm_ctx->client_mutex);
 	for (i = 0; i < IPA_EP_PER_REG && (i + pipe_add) < max_pipes; i++) {
 		if (pipe_bitmask & (1 << i)) {
+			type = ipa3_get_client_by_pipe(i + pipe_add);
+			IPA_PM_ERR("Client %s woke up the system\n",
+					ipa_clients_strings[type]);
 			client = ipa_pm_ctx->clients_by_pipe[i + pipe_add];
 			if (client && !client_notified[client->hdl]) {
 				if (client->callback) {
@@ -1554,7 +1567,7 @@ bool ipa_get_pm_client_stats_filled(struct pm_client_stats *pm_stats_ptr,
 
 int ipa_pm_get_pm_clnt_throughput(enum ipa_client_type client_type)
 {
-	int idx = ipa3_get_ep_mapping(client_type);
+	int idx = ipa_get_ep_mapping(client_type);
 	int throughput;
 
 	mutex_lock(&ipa_pm_ctx->client_mutex);
