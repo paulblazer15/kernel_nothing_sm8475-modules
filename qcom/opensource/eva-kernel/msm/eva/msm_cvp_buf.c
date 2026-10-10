@@ -554,11 +554,12 @@ static u32 msm_cvp_map_user_persist_buf(struct msm_cvp_inst *inst,
 
 	mutex_lock(&inst->persistbufs.lock);
 	list_add_tail(&pbuf->list, &inst->persistbufs.list);
-	mutex_unlock(&inst->persistbufs.lock);
+
 
 	print_internal_buffer(CVP_MEM, "map persist", inst, pbuf);
 
 	iova = smem->device_addr + buf->offset;
+	mutex_unlock(&inst->persistbufs.lock);
 
 	return iova;
 
@@ -683,7 +684,8 @@ int msm_cvp_unmap_user_persist(struct msm_cvp_inst *inst,
 	u64 ktid;
 	int rc = 0;
 	struct msm_cvp_smem *smem = NULL;
-
+	dprintk(CVP_ERR, "%s: Unsupported request\n", __func__);
+	return -EINVAL;
 	if (!offset || !buf_num)
 		return rc;
 
