@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2014, 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -27,8 +27,8 @@
 #define RMNET_INGRESS_FORMAT_DL_MARKER_V2       BIT(29)
 
 #define RMNET_FLAGS_INGRESS_COALESCE            BIT(4)
-#define RMNET_FLAGS_INGRESS_MAP_CKSUMV5         BIT(5)
-#define RMNET_FLAGS_EGRESS_MAP_CKSUMV5          BIT(6)
+#define RMNET_PRIV_FLAGS_INGRESS_MAP_CKSUMV5    BIT(5)
+#define RMNET_PRIV_FLAGS_EGRESS_MAP_CKSUMV5     BIT(6)
 
 #define RMNET_INGRESS_FORMAT_DL_MARKER  (RMNET_INGRESS_FORMAT_DL_MARKER_V1 |\
 RMNET_INGRESS_FORMAT_DL_MARKER_V2)
@@ -43,10 +43,6 @@ RMNET_INGRESS_FORMAT_DL_MARKER_V2)
 /* UL Aggregation parameters */
 #define RMNET_PAGE_RECYCLE                      BIT(0)
 
-/* IP-Mux feature */
-#define RMNET_INGRESS_FORMAT_IP_ROUTE           BIT(25)
-#define RMNET_EGRESS_FORMAT_IP_ROUTE            BIT(24)
-
 /* Replace skb->dev to a virtual rmnet device and pass up the stack */
 #define RMNET_EPMODE_VND (1)
 /* Pass the frame directly to another device with dev_queue_xmit() */
@@ -58,9 +54,15 @@ struct rmnet_skb_cb {
 	char flush_shs;
 	char qmap_steer;
 
+	bool tethered;
+
 	/* coalescing stats */
 	u32 coal_bytes;
 	u32 coal_bufsize;
+
+	u32 bif;
+	u32 ack_thresh;
+	u32 ack_forced;
 };
 
 #define RMNET_SKB_CB(skb) ((struct rmnet_skb_cb *)(skb)->cb)

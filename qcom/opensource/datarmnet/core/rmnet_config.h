@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2014, 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -15,13 +15,14 @@
  */
 
 #include <linux/skbuff.h>
+#include <linux/version.h>
 #include <net/gro_cells.h>
 
 #ifndef _RMNET_CONFIG_H_
 #define _RMNET_CONFIG_H_
 
 #define RMNET_MAX_LOGICAL_EP 255
-#define RMNET_MAX_VEID 4
+#define RMNET_MAX_VEID 16
 
 #define RMNET_SHS_STMP_ALL BIT(0)
 #define RMNET_SHS_NO_PSH BIT(1)
@@ -49,18 +50,9 @@ struct rmnet_shs_clnt_s {
 };
 
 struct rmnet_endpoint {
-	union {
-		u8 mux_id;
-		__be32 ifa_address;
-		struct in6_addr in6addr;
-	};
+	u8 mux_id;
 	struct net_device *egress_dev;
 	struct hlist_node hlnode;
-};
-
-struct rmnet_ip_route_endpoint {
-	struct in6_addr addr;
-	struct net_device *egress_dev;
 };
 
 struct rmnet_agg_stats {
@@ -85,6 +77,10 @@ struct rmnet_port_priv_stats {
 	u64 dl_chain_stat[7];
 	u64 dl_frag_stat_1;
 	u64 dl_frag_stat[5];
+	u64 pb_marker_count;
+	u64 pb_marker_seq;
+	u64 chained_packets_recvd;
+	u64 packets_chained;
 };
 
 struct rmnet_egress_agg_params {
@@ -145,6 +141,8 @@ struct rmnet_port {
 	struct list_head dl_list;
 	struct rmnet_port_priv_stats stats;
 	int dl_marker_flush;
+	/* Pending Byte Marker */
+	struct list_head pb_list;
 	/* Port Config for shs */
 	struct rmnet_shs_clnt_s shs_cfg;
 	struct rmnet_shs_clnt_s phy_shs_cfg;
@@ -152,6 +150,7 @@ struct rmnet_port {
 	/* Descriptor pool */
 	spinlock_t desc_pool_lock;
 	struct rmnet_frag_descriptor_pool *frag_desc_pool;
+	struct notifier_block dfc_pm_notifier;
 };
 
 extern struct rtnl_link_ops rmnet_link_ops;
@@ -228,6 +227,7 @@ struct rmnet_priv {
 	struct gro_cells gro_cells;
 	struct rmnet_priv_stats stats;
 	void __rcu *qos_info;
+	char aps_cb[16];
 };
 
 enum rmnet_dl_marker_prio {
@@ -258,10 +258,4 @@ int rmnet_add_bridge(struct net_device *rmnet_dev,
 		     struct netlink_ext_ack *extack);
 int rmnet_del_bridge(struct net_device *rmnet_dev,
 		     struct net_device *slave_dev);
-
-struct rmnet_endpoint *rmnet_get_ip6_route_endpoint(struct rmnet_port *port,
-						    struct in6_addr *saddr,
-						    struct in6_addr *daddr);
-struct rmnet_endpoint *rmnet_get_ip4_route_endpoint(struct rmnet_port *port,
-						    __be32 *ifa_address);
 #endif /* _RMNET_CONFIG_H_ */

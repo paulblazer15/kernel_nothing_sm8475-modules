@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -61,5 +62,12 @@ int dfc_qmap_cmd_handler(struct sk_buff *skb);
 #define QMAP_LL_SWITCH		25
 #define QMAP_LL_SWITCH_STATUS	26
 int ll_qmap_cmd_handler(struct sk_buff *skb);
+
+#define QMAP_CMD_31		31
+#define QMAP_CMD_32		32
+#define QMAP_DATA_REPORT	34
+#define QMAP_CMD_40		40
+#define QMAP_CMD_41		41
+#define QMAP_CMD_42		42
 
 #endif /* __RMNET_QMAP_H */

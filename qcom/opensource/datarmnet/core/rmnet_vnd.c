@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -23,8 +23,14 @@
 #include <linux/inet.h>
 #include <linux/icmp.h>
 #include <linux/icmpv6.h>
+#include <linux/ethtool.h>
+#include <linux/version.h>
 #include <net/pkt_sched.h>
 #include <net/ipv6.h>
+#if (KERNEL_VERSION(6, 5, 0) <= LINUX_VERSION_CODE)
+/* Needed kernel version check for compatibility */
+#include <net/gso.h>
+#endif
 #include "rmnet_config.h"
 #include "rmnet_handlers.h"
 #include "rmnet_private.h"
@@ -33,18 +39,11 @@
 #include "rmnet_genl.h"
 #include "rmnet_ll.h"
 #include "rmnet_ctl.h"
+#include "rmnet_module.h"
 
 #include "qmi_rmnet.h"
 #include "rmnet_qmi.h"
 #include "rmnet_trace.h"
-
-typedef void (*rmnet_perf_tether_egress_hook_t)(struct sk_buff *skb);
-rmnet_perf_tether_egress_hook_t rmnet_perf_tether_egress_hook __rcu __read_mostly;
-EXPORT_SYMBOL(rmnet_perf_tether_egress_hook);
-
-typedef void (*rmnet_perf_egress_hook1_t)(struct sk_buff *skb);
-rmnet_perf_egress_hook1_t rmnet_perf_egress_hook1 __rcu __read_mostly;
-EXPORT_SYMBOL(rmnet_perf_egress_hook1);
 
 /* RX/TX Fixup */
 
@@ -83,21 +82,28 @@ static netdev_tx_t rmnet_vnd_start_xmit(struct sk_buff *skb,
 	int ip_type;
 	u32 mark;
 	unsigned int len;
-	rmnet_perf_tether_egress_hook_t rmnet_perf_tether_egress;
+	int aps_rc;
 	bool low_latency = false;
 	bool need_to_drop = false;
 
 	priv = netdev_priv(dev);
+
+	if (rmnet_module_hook_aps_post_queue(&aps_rc, dev, skb)) {
+		if (unlikely(aps_rc)) {
+			this_cpu_inc(priv->pcpu_stats->stats.tx_drops);
+			kfree_skb(skb);
+			return NETDEV_TX_OK;
+		}
+	}
+
 	if (priv->real_dev) {
 		ip_type = (ip_hdr(skb)->version == 4) ?
 					AF_INET : AF_INET6;
 		mark = skb->mark;
 		len = skb->len;
 		trace_rmnet_xmit_skb(skb);
-		rmnet_perf_tether_egress = rcu_dereference(rmnet_perf_tether_egress_hook);
-		if (rmnet_perf_tether_egress) {
-			rmnet_perf_tether_egress(skb);
-		}
+		rmnet_module_hook_perf_tether_egress(skb);
+		rmnet_module_hook_wlan_flow_match(skb);
 
 		qmi_rmnet_get_flow_state(dev, skb, &need_to_drop, &low_latency);
 		if (unlikely(need_to_drop)) {
@@ -106,8 +112,15 @@ static netdev_tx_t rmnet_vnd_start_xmit(struct sk_buff *skb,
 			return NETDEV_TX_OK;
 		}
 
-		if (RMNET_APS_LLC(skb->priority))
-			low_latency = true;
+		if (*(rmnet_ll_get_ipa_ready_status()) == RMNET_LL_PIPE_SUCCESS) {
+			if (RMNET_APS_LLC(skb->priority))
+				low_latency = true;
+		} else {
+			low_latency = false;
+		}
+
+		if (skb_is_gso(skb))
+			rmnet_module_hook_perf_seg_stat(priv->mux_id, skb);
 
 		if ((low_latency || RMNET_APS_LLB(skb->priority)) &&
 		    skb_is_gso(skb)) {
@@ -177,7 +190,7 @@ static netdev_tx_t rmnet_vnd_start_xmit(struct sk_buff *skb,
 			rmnet_egress_handler(skb, low_latency);
 		}
 		qmi_rmnet_burst_fc_check(dev, ip_type, mark, len);
-		qmi_rmnet_work_maybe_restart(rmnet_get_rmnet_port(dev));
+		qmi_rmnet_work_maybe_restart(rmnet_get_rmnet_port(dev), NULL, NULL);
 	} else {
 		this_cpu_inc(priv->pcpu_stats->stats.tx_drops);
 		kfree_skb(skb);
@@ -246,12 +259,12 @@ static void rmnet_get_stats64(struct net_device *dev,
 		pcpu_ptr = per_cpu_ptr(priv->pcpu_stats, cpu);
 
 		do {
-			start = u64_stats_fetch_begin_irq(&pcpu_ptr->syncp);
+			start = u64_stats_fetch_begin(&pcpu_ptr->syncp);
 			total_stats.rx_pkts += pcpu_ptr->stats.rx_pkts;
 			total_stats.rx_bytes += pcpu_ptr->stats.rx_bytes;
 			total_stats.tx_pkts += pcpu_ptr->stats.tx_pkts;
 			total_stats.tx_bytes += pcpu_ptr->stats.tx_bytes;
-		} while (u64_stats_fetch_retry_irq(&pcpu_ptr->syncp, start));
+		} while (u64_stats_fetch_retry(&pcpu_ptr->syncp, start));
 
 		total_stats.tx_drops += pcpu_ptr->stats.tx_drops;
 	}
@@ -263,9 +276,6 @@ static void rmnet_get_stats64(struct net_device *dev,
 	s->tx_dropped = total_stats.tx_drops;
 }
 
-void (*rmnet_aps_set_prio)(struct net_device *dev, struct sk_buff *skb);
-EXPORT_SYMBOL(rmnet_aps_set_prio);
-
 static u16 rmnet_vnd_select_queue(struct net_device *dev,
 				  struct sk_buff *skb,
 				  struct net_device *sb_dev)
@@ -274,13 +284,8 @@ static u16 rmnet_vnd_select_queue(struct net_device *dev,
 	u64 boost_period = 0;
 	int boost_trigger = 0;
 	int txq = 0;
-	rmnet_perf_egress_hook1_t rmnet_perf_egress1;
-	void (*aps_set_prio)(struct net_device *dev, struct sk_buff *skb);
 
-	rmnet_perf_egress1 = rcu_dereference(rmnet_perf_egress_hook1);
-	if (rmnet_perf_egress1) {
-		rmnet_perf_egress1(skb);
-	}
+	rmnet_module_hook_perf_egress(skb);
 
 	if (trace_print_icmp_tx_enabled()) {
 		char saddr[INET6_ADDRSTRLEN], daddr[INET6_ADDRSTRLEN];
@@ -356,6 +361,7 @@ skip_trace_print_icmp_tx:
 skip_trace_print_tcp_tx:
 	if (trace_print_udp_tx_enabled()) {
 		char saddr[INET6_ADDRSTRLEN], daddr[INET6_ADDRSTRLEN];
+		u16 ip_id = 0;
 
 		memset(saddr, 0, INET6_ADDRSTRLEN);
 		memset(daddr, 0, INET6_ADDRSTRLEN);
@@ -366,6 +372,7 @@ skip_trace_print_tcp_tx:
 
 			snprintf(saddr, INET6_ADDRSTRLEN, "%pI4", &ip_hdr(skb)->saddr);
 			snprintf(daddr, INET6_ADDRSTRLEN, "%pI4", &ip_hdr(skb)->daddr);
+			ip_id = ntohs(ip_hdr(skb)->id);
 		}
 
 		if (skb->protocol == htons(ETH_P_IPV6)) {
@@ -376,7 +383,7 @@ skip_trace_print_tcp_tx:
 			snprintf(daddr, INET6_ADDRSTRLEN, "%pI6", &ipv6_hdr(skb)->daddr);
 		}
 
-		trace_print_udp_tx(skb, saddr, daddr, udp_hdr(skb));
+		trace_print_udp_tx(skb, saddr, daddr, udp_hdr(skb), ip_id);
 	}
 
 skip_trace_print_udp_tx:
@@ -438,11 +445,7 @@ skip_trace:
 			(void) boost_period;
 	}
 
-	rcu_read_lock();
-	aps_set_prio = READ_ONCE(rmnet_aps_set_prio);
-	if (aps_set_prio)
-		aps_set_prio(dev, skb);
-	rcu_read_unlock();
+	rmnet_module_hook_aps_pre_queue(dev, skb);
 
 	return (txq < dev->real_num_tx_queues) ? txq : 0;
 }
@@ -491,6 +494,18 @@ static const char rmnet_gstrings_stats[][ETH_GSTRING_LEN] = {
 	"Coalescing packets over VEID1",
 	"Coalescing packets over VEID2",
 	"Coalescing packets over VEID3",
+	"Coalescing packets over VEID4",
+	"Coalescing packets over VEID5",
+	"Coalescing packets over VEID6",
+	"Coalescing packets over VEID7",
+	"Coalescing packets over VEID8",
+	"Coalescing packets over VEID9",
+	"Coalescing packets over VEID10",
+	"Coalescing packets over VEID11",
+	"Coalescing packets over VEID12",
+	"Coalescing packets over VEID13",
+	"Coalescing packets over VEID14",
+	"Coalescing packets over VEID15",
 	"Coalescing TCP frames",
 	"Coalescing TCP bytes",
 	"Coalescing UDP frames",
@@ -534,6 +549,10 @@ static const char rmnet_port_gstrings_stats[][ETH_GSTRING_LEN] = {
 	"DL chaining frags [8-11]",
 	"DL chaining frags [12-15]",
 	"DL chaining frags = 16",
+	"PB Byte Marker Count",
+	"PB Byte Marker Seq",
+	"Chained packets received",
+	"Packets chained",
 };
 
 static const char rmnet_ll_gstrings_stats[][ETH_GSTRING_LEN] = {
@@ -669,7 +688,7 @@ void rmnet_vnd_setup(struct net_device *rmnet_dev)
 	rmnet_dev->netdev_ops = &rmnet_vnd_ops;
 	rmnet_dev->mtu = RMNET_DFLT_PACKET_SIZE;
 	rmnet_dev->needed_headroom = RMNET_NEEDED_HEADROOM;
-	random_ether_addr(rmnet_dev->perm_addr);
+	eth_random_addr(rmnet_dev->perm_addr);
 	rmnet_dev->tx_queue_len = RMNET_TX_QUEUE_LEN;
 
 	/* Raw IP mode */
@@ -707,7 +726,7 @@ int rmnet_vnd_newlink(u8 id, struct net_device *rmnet_dev,
 
 	priv->real_dev = real_dev;
 
-	rmnet_dev->gso_max_size = 64000;
+	rmnet_dev->gso_max_size = 65535;
 
 	rc = register_netdevice(rmnet_dev);
 	if (!rc) {
@@ -766,10 +785,5 @@ void rmnet_vnd_reset_mac_addr(struct net_device *dev)
 	if (dev->netdev_ops != &rmnet_vnd_ops)
 		return;
 
-	random_ether_addr(dev->perm_addr);
-}
-
-int netif_is_rmnet(const struct net_device *dev)
-{
-	return dev->netdev_ops == &rmnet_vnd_ops;
+	eth_random_addr(dev->perm_addr);
 }

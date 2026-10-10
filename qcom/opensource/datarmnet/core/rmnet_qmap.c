@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -15,6 +16,8 @@
 #include "rmnet_qmi.h"
 #include "rmnet_ctl.h"
 #include "rmnet_qmap.h"
+#include "rmnet_module.h"
+#include "rmnet_hook.h"
 
 static atomic_t qmap_txid;
 static void *rmnet_ctl_handle;
@@ -24,7 +27,7 @@ static struct rmnet_ctl_client_if *rmnet_ctl;
 
 int rmnet_qmap_send(struct sk_buff *skb, u8 ch, bool flush)
 {
-	trace_dfc_qmap(skb->data, skb->len, false);
+	trace_dfc_qmap(skb->data, skb->len, false, ch);
 
 	if (ch != RMNET_CH_CTL && real_data_dev) {
 		skb->protocol = htons(ETH_P_MAP);
@@ -43,6 +46,7 @@ int rmnet_qmap_send(struct sk_buff *skb, u8 ch, bool flush)
 
 	return 0;
 }
+EXPORT_SYMBOL(rmnet_qmap_send);
 
 static void rmnet_qmap_cmd_handler(struct sk_buff *skb)
 {
@@ -52,7 +56,7 @@ static void rmnet_qmap_cmd_handler(struct sk_buff *skb)
 	if (!skb)
 		return;
 
-	trace_dfc_qmap(skb->data, skb->len, true);
+	trace_dfc_qmap(skb->data, skb->len, true, RMNET_CH_CTL);
 
 	if (skb->len < sizeof(struct qmap_cmd_hdr))
 		goto free_skb;
@@ -75,6 +79,20 @@ static void rmnet_qmap_cmd_handler(struct sk_buff *skb)
 	case QMAP_LL_SWITCH:
 	case QMAP_LL_SWITCH_STATUS:
 		rc = ll_qmap_cmd_handler(skb);
+		break;
+
+	case QMAP_DATA_REPORT:
+		rmnet_module_hook_aps_data_report(skb);
+		rc = QMAP_CMD_DONE;
+		break;
+
+	case QMAP_CMD_31:
+	case QMAP_CMD_32:
+	case QMAP_CMD_40:
+	case QMAP_CMD_41:
+	case QMAP_CMD_42:
+		rmnet_module_hook_perf_cmd_ingress(skb);
+		rc = QMAP_CMD_DONE;
 		break;
 
 	default:
@@ -109,6 +127,7 @@ int rmnet_qmap_next_txid(void)
 {
 	return atomic_inc_return(&qmap_txid);
 }
+EXPORT_SYMBOL(rmnet_qmap_next_txid);
 
 struct net_device *rmnet_qmap_get_dev(u8 mux_id)
 {
