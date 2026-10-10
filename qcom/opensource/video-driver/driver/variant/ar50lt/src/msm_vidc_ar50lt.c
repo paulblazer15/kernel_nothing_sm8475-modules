@@ -544,14 +544,18 @@ static int __power_on_ar50lt_hardware(struct msm_vidc_core *core)
 	if (rc)
 		goto fail_clk_axi;
 
+#ifndef CONFIG_ARCH_VIENNA
 	rc = __prepare_enable_clock_ar50lt(core, "throttle_clk");
 	if (rc)
 		goto fail_clk_throttle;
-
+#endif
 	return 0;
 
+#ifndef CONFIG_ARCH_VIENNA
 fail_clk_throttle:
 	__disable_unprepare_clock_ar50lt(core, "core0_bus_clk");
+#endif
+
 fail_clk_axi:
 	__disable_unprepare_clock_ar50lt(core, "core0_clk");
 fail_clk_controller:
@@ -673,11 +677,13 @@ disable_power:
 		rc = 0;
 	}
 
+#ifndef CONFIG_ARCH_VIENNA
 	rc = __disable_unprepare_clock_ar50lt(core, "throttle_clk");
 	if (rc) {
 		d_vpr_e("%s: disable unprepare throttle_clk failed with %d\n", __func__, rc);
 		rc = 0;
 	}
+#endif
 
 	return rc;
 }

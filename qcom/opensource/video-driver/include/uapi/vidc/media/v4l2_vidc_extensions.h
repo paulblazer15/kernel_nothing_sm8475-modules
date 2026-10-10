@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef __V4l2_VIDC_EXTENSIONS_H__
@@ -166,6 +166,25 @@ enum v4l2_mpeg_vidc_blur_types {
 
 #define V4L2_CID_MPEG_VIDC_CLIENT_ID                                          \
 	(V4L2_CID_MPEG_VIDC_BASE + 0x41)
+
+/*
+ * This control is introduced to overcome v4l2 limitation
+ * of allowing only standard colorspace info via s_fmt.
+ * v4l_sanitize_colorspace() is introduced in s_fmt ioctl
+ * to reject private colorspace. Through this control, client
+ * can set private colorspace info and/or use this control
+ * to set colorspace dynamically.
+ * The control value is 32 bits packed as:
+ *      [ 0 -  7] : matrix coefficients
+ *      [ 8 - 15] : transfer characteristics
+ *      [16 - 23] : colour primaries
+ *      [24 - 31] : range
+ * This control is only for encoder.
+ * Currently g_fmt in v4l2 does not santize colorspace,
+ * hence this control is not introduced for decoder.
+ */
+#define V4L2_CID_MPEG_VIDC_SIGNAL_COLOR_INFO                                   \
+        (V4L2_CID_MPEG_VIDC_BASE + 0x42)
 
 /* Deprecate below controls once availble in gki and gsi bionic header */
 #ifndef V4L2_CID_MPEG_VIDEO_BASELAYER_PRIORITY_ID

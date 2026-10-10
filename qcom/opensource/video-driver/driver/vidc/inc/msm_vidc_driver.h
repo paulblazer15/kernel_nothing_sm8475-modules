@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
  */
 
@@ -173,7 +173,14 @@ static inline bool is_linear_colorformat(enum msm_vidc_colorformat_type colorfor
 {
 	return is_linear_yuv_colorformat(colorformat) || is_linear_rgba_colorformat(colorformat);
 }
-
+static inline bool is_split_mode_enabled(struct msm_vidc_inst *inst)
+{
+	if (!is_decode_session(inst))
+		return false;
+	if (is_linear_colorformat(inst->capabilities->cap[PIX_FMTS].value))
+		return true;
+	return false;
+}
 static inline bool is_ubwc_colorformat(enum msm_vidc_colorformat_type colorformat)
 {
 	return colorformat == MSM_VIDC_FMT_NV12C ||
@@ -412,7 +419,7 @@ int msm_vidc_state_change_last_flag(struct msm_vidc_inst *inst);
 int msm_vidc_get_mbs_per_frame(struct msm_vidc_inst *inst);
 int msm_vidc_get_fps(struct msm_vidc_inst *inst);
 int msm_vidc_num_buffers(struct msm_vidc_inst *inst,
-	enum msm_vidc_buffer_type type, enum msm_vidc_buffer_attributes attr);
+enum msm_vidc_buffer_type type, enum msm_vidc_buffer_attributes attr);
 void core_lock(struct msm_vidc_core *core, const char *function);
 void core_unlock(struct msm_vidc_core *core, const char *function);
 bool core_lock_check(struct msm_vidc_core *core, const char *function);

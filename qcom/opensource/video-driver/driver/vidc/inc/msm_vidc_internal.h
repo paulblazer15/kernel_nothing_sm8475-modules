@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022,2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _MSM_VIDC_INTERNAL_H_
@@ -316,6 +316,7 @@ enum msm_vidc_core_capability_type {
 	MAX_MBPF_B_FRAME,
 	MAX_MBPS_B_FRAME,
 	MAX_MBPS_ALL_INTRA,
+	MAX_MBPS_RETURN_ENOMEM,
 	MAX_ENH_LAYER_COUNT,
 	NUM_VPP_PIPE,
 	SW_PC,
@@ -487,6 +488,7 @@ enum msm_vidc_inst_capability_type {
 	META_DEC_QP_METADATA,
 	COMPLEXITY,
 	META_MAX_NUM_REORDER_FRAMES,
+	SIGNAL_COLOR_INFO,
 	INST_CAP_MAX,
 };
 
@@ -555,6 +557,7 @@ enum sku_version {
 	SKU_VERSION_0 = 0,
 	SKU_VERSION_1,
 	SKU_VERSION_2,
+	SKU_VERSION_3 = 4,
 };
 
 enum msm_vidc_ssr_trigger_type {
@@ -807,7 +810,13 @@ struct msm_vidc_alloc {
 	u8                          secure:1;
 	u8                          map_kernel:1;
 	struct dma_buf             *dmabuf;
-#if (KERNEL_VERSION(5, 15, 0) <= LINUX_VERSION_CODE)
+	/*
+	 * Kalama uses Kernel Version 5.15.x,
+	 * Pineapple uses Kernel version 5.18.x
+	 */
+#if (KERNEL_VERSION(5, 16, 0) <= LINUX_VERSION_CODE)
+	struct iosys_map            dmabuf_map;
+#elif (KERNEL_VERSION(5, 15, 0) <= LINUX_VERSION_CODE)
 	struct dma_buf_map          dmabuf_map;
 #endif
 	void                       *kvaddr;

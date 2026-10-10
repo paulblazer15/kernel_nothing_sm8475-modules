@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/of_platform.h>
@@ -27,9 +27,6 @@
 #if defined(CONFIG_MSM_VIDC_KHAJE)
 #include "msm_vidc_khaje.h"
 #endif
-#if defined(CONFIG_MSM_VIDC_SCUBA)
-#include "msm_vidc_scuba.h"
-#endif
 #if defined(CONFIG_MSM_VIDC_MONACO)
 #include "msm_vidc_monaco.h"
 #endif
@@ -39,8 +36,14 @@
 #if defined(CONFIG_MSM_VIDC_RAVELIN)
 #include "msm_vidc_ravelin.h"
 #endif
+#if defined(CONFIG_MSM_VIDC_BLAIR)
+#include "msm_vidc_blair.h"
+#endif
 #if defined(CONFIG_MSM_VIDC_NEO)
 #include "msm_vidc_neo.h"
+#endif
+#if defined(CONFIG_MSM_VIDC_VIENNA)
+#include "msm_vidc_vienna.h"
 #endif
 #if defined(CONFIG_MSM_VIDC_IRIS2) || defined(CONFIG_MSM_VIDC_IRIS3)
 #include "msm_vidc_iris2.h"
@@ -236,15 +239,6 @@ static int msm_vidc_deinit_platform_variant(struct msm_vidc_core *core, struct d
 	}
 #endif
 
-#if defined(CONFIG_MSM_VIDC_SCUBA)
-	if (of_device_is_compatible(dev->of_node, "qcom,msm-vidc-scuba")) {
-		rc = msm_vidc_deinit_platform_scuba(core, dev);
-		if (rc)
-			d_vpr_e("%s: failed with %d\n", __func__, rc);
-		return rc;
-	}
-#endif
-
 #if defined(CONFIG_MSM_VIDC_MONACO)
 	if (of_device_is_compatible(dev->of_node, "qcom,msm-vidc-monaco")) {
 		rc = msm_vidc_deinit_platform_monaco(core, dev);
@@ -281,17 +275,36 @@ static int msm_vidc_deinit_platform_variant(struct msm_vidc_core *core, struct d
 		return rc;
 	}
 #endif
+#if defined(CONFIG_MSM_VIDC_BLAIR)
+	if (of_device_is_compatible(dev->of_node, "qcom,msm-vidc-blair") ||
+			of_device_is_compatible(dev->of_node, "qcom,msm-vidc-pitti")) {
+		rc = msm_vidc_deinit_platform_blair(core, dev);
+		if (rc)
+			d_vpr_e("%s: failed msm-vidc-blair with %d\n",
+				__func__, rc);
+		return rc;
+	}
+#endif
+#if defined(CONFIG_MSM_VIDC_VIENNA)
+	if (of_device_is_compatible(dev->of_node, "qcom,msm-vidc-vienna")) {
+		rc = msm_vidc_deinit_platform_vienna(core, dev);
+		if (rc)
+			d_vpr_e("%s: failed msm-vidc-vienna with %d\n",
+				__func__, rc);
+		return rc;
+	}
+#endif
 
 	return rc;
 }
 
 static int msm_vidc_init_platform_variant(struct msm_vidc_core *core, struct device *dev)
 {
-#if defined(CONFIG_MSM_VIDC_KHAJE)
+	int rc = -EINVAL;
+#if defined(CONFIG_MSM_VIDC_BLAIR)
 	struct msm_platform_core_capability *platform_data;
 	int i, num_platform_caps;
 #endif
-	int rc = -EINVAL;
 
 	if (!core || !dev) {
 		d_vpr_e("%s: Invalid params\n", __func__);
@@ -338,38 +351,22 @@ static int msm_vidc_init_platform_variant(struct msm_vidc_core *core, struct dev
 	}
 #endif
 
-#if defined(CONFIG_MSM_VIDC_NEO)
-	if (of_device_is_compatible(dev->of_node, "qcom,msm-vidc-neo")) {
-		rc = msm_vidc_init_platform_neo(core, dev);
-		if (rc)
-			d_vpr_e("%s: failed msm-vidc-neo with %d\n",
-				__func__, rc);
-		return rc;
-	}
-#endif
-#if defined(CONFIG_MSM_VIDC_SCUBA)
-	if (of_device_is_compatible(dev->of_node, "qcom,msm-vidc-scuba")) {
-		rc = msm_vidc_init_platform_scuba(core, dev);
+#if defined(CONFIG_MSM_VIDC_BLAIR)
+	if (of_device_is_compatible(dev->of_node, "qcom,msm-vidc-blair") ||
+			of_device_is_compatible(dev->of_node, "qcom,msm-vidc-pitti")) {
+		rc = msm_vidc_init_platform_blair(core, dev);
 		if (rc) {
-			d_vpr_e("%s: failed msm-vidc-scuba with %d\n",
+			d_vpr_e("%s: failed msm-vidc-blair with %d\n",
 				__func__, rc);
 			return rc;
 		}
 	}
-#endif
-
-#if defined(CONFIG_MSM_VIDC_KHAJE)
-	if (of_device_is_compatible(dev->of_node, "qcom,msm-vidc-khaje")) {
-		rc = msm_vidc_init_platform_khaje(core, dev);
+	// Update number of max supported session for pitti_32go
+	if (of_device_is_compatible(dev->of_node, "qcom,msm-vidc-pitti-32go")) {
+		rc = msm_vidc_init_platform_blair(core, dev);
 		if (rc) {
-			d_vpr_e("%s: failed with %d\n", __func__, rc);
-			return rc;
-		}
-	}
-	if (of_device_is_compatible(dev->of_node, "qcom,msm-vidc-khaje-iot")) {
-		rc = msm_vidc_init_platform_khaje(core, dev);
-		if (rc) {
-			d_vpr_e("%s: failed with %d\n", __func__, rc);
+			d_vpr_e("%s: failed msm-vidc-blair with %d\n",
+				__func__, rc);
 			return rc;
 		}
 		if (!core || !core->platform) {
@@ -379,11 +376,33 @@ static int msm_vidc_init_platform_variant(struct msm_vidc_core *core, struct dev
 		platform_data = core->platform->data.core_data;
 		num_platform_caps = core->platform->data.core_data_size;
 		for (i = 0; i < num_platform_caps && i < CORE_CAP_MAX; i++) {
-			if (platform_data[i].type == MAX_SESSION_COUNT)
+			if (platform_data[i].type == MAX_SESSION_COUNT) {
 				platform_data[i].value = 4;
+				break;
+			}
 		}
 	}
-	return rc;
+
+		return rc;
+#endif
+
+#if defined(CONFIG_MSM_VIDC_NEO)
+	if (of_device_is_compatible(dev->of_node, "qcom,msm-vidc-neo")) {
+		rc = msm_vidc_init_platform_neo(core, dev);
+		if (rc)
+			d_vpr_e("%s: failed msm-vidc-neo with %d\n",
+				__func__, rc);
+		return rc;
+	}
+#endif
+
+#if defined(CONFIG_MSM_VIDC_KHAJE)
+	if (of_device_is_compatible(dev->of_node, "qcom,msm-vidc-khaje")) {
+		rc = msm_vidc_init_platform_khaje(core, dev);
+		if (rc)
+			d_vpr_e("%s: failed with %d\n", __func__, rc);
+		return rc;
+	}
 #endif
 
 #if defined(CONFIG_MSM_VIDC_MONACO)
@@ -391,6 +410,15 @@ static int msm_vidc_init_platform_variant(struct msm_vidc_core *core, struct dev
 		rc = msm_vidc_init_platform_monaco(core, dev);
 		if (rc)
 			d_vpr_e("%s: failed with %d\n", __func__, rc);
+		return rc;
+	}
+#endif
+#if defined(CONFIG_MSM_VIDC_VIENNA)
+	if (of_device_is_compatible(dev->of_node, "qcom,msm-vidc-vienna")) {
+		rc = msm_vidc_init_platform_vienna(core, dev);
+		if (rc)
+			d_vpr_e("%s: failed msm-vidc-vienna with %d\n",
+				__func__, rc);
 		return rc;
 	}
 #endif
@@ -595,6 +623,7 @@ void msm_vidc_ddr_ubwc_config(
 	struct msm_vidc_platform_data *platform_data, u32 hbb_override_val)
 {
 	uint32_t ddr_type = DDR_TYPE_LPDDR5;
+	struct device_node *mem_node;
 
 	if (!platform_data || !platform_data->ubwc_config) {
 		d_vpr_e("%s: invalid params\n", __func__);
@@ -607,11 +636,13 @@ void msm_vidc_ddr_ubwc_config(
 		d_vpr_e("Failed to get ddr type, use LPDDR5\n");
 #endif
 
+	mem_node = of_find_node_by_path("/memory");
+	of_property_read_u32(mem_node, "ddr_device_type", &ddr_type);
+
 	if (platform_data->ubwc_config &&
 		(ddr_type == DDR_TYPE_LPDDR4 ||
 		 ddr_type == DDR_TYPE_LPDDR4X))
 		platform_data->ubwc_config->highest_bank_bit = hbb_override_val;
-
 	d_vpr_h("DDR Type 0x%x hbb 0x%x\n",
 		ddr_type, platform_data->ubwc_config ?
 		platform_data->ubwc_config->highest_bank_bit : -1);
@@ -630,5 +661,5 @@ void msm_vidc_sort_table(struct msm_vidc_core *core)
 		sizeof(*core->dt->allowed_clks_tbl), cmp, NULL);
 	d_vpr_h("Updated allowed clock rates\n");
 	for (i = 0; i < core->dt->allowed_clks_tbl_size; i++)
-		d_vpr_h("    %d\n", core->dt->allowed_clks_tbl[i]);
+		d_vpr_h("    %u\n", core->dt->allowed_clks_tbl[i].clock_rate);
 }

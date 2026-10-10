@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2019, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #include "msm_vidc_power_ar50lt.h"
 #include "msm_vidc_inst.h"
@@ -86,7 +86,7 @@ u64 msm_vidc_calc_freq_ar50lt(struct msm_vidc_inst *inst, u32 data_size)
 	if (i < 0)
 		i = 0;
 
-	i_vpr_p(inst, "%s: filled len %d, required freq %llu, fps %u, mbpf %u\n",
+	i_vpr_p(inst, "%s: filled len %d, required freq %llu, fps %llu, mbpf %u\n",
 		__func__, data_size, freq, fps, mbpf);
 
 	return (unsigned long) freq;

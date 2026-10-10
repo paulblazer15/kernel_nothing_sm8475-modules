@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022,2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include "msm_vidc_control.h"
@@ -184,7 +184,7 @@ static int msm_vidc_packetize_control(struct msm_vidc_inst *inst,
 
 	if (payload_size <= sizeof(u64))
 		i_vpr_h(inst,
-			"set cap: name: %24s, cap value: %#10x, hfi: %#10x\n",
+			"set cap: name: %24s, cap value: %#10x, hfi: %#llx\n",
 			cap_name(cap_id), inst->capabilities->cap[cap_id].value, payload);
 	else
 		i_vpr_h(inst,
@@ -1048,6 +1048,151 @@ int msm_vidc_adjust_profile(void *instance, struct v4l2_ctrl *ctrl)
 
 	msm_vidc_update_cap_value(inst, PROFILE,
 		adjusted_value, __func__);
+
+	return 0;
+}
+
+static s64 msm_vidc_adjust_h264_level(struct msm_vidc_inst *inst, u64 frame_size,
+				      u64 samples_per_sec, u64 dpb_size, u64 target_bitrate)
+{
+	static struct h264_level_table level_table[] = {
+		/*  level, max_mbsps, max_frame_size,max_bit_rate, max_dpb_mbs */
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_1_0,      1485,     99,      64,     396 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_1B,       1485,     99,     128,     396 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_1_1,      3000,    396,     192,     900 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_1_2,      6000,    396,     384,    2376 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_1_3,     11880,    396,     768,    2376 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_2_0,     11880,    396,    2000,    2376 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_2_1,     19800,    792,    4000,    4752 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_2_2,     20250,   1620,    4000,    8100 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_3_0,     40500,   1620,   10000,    8100 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_3_1,    108000,   3600,   14000,   18000 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_3_2,    216000,   5120,   20000,   20480 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_4_0,    245760,   8192,   20000,   32768 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_4_1,    245760,   8192,   50000,   32768 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_4_2,    522240,   8704,   50000,   34816 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_5_0,    589824,  22080,  135000,  110400 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_5_1,    983040,  36864,  240000,  184320 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_5_2,   2073600,  36864,  240000,  184320 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_6_0,   4177920, 139264,  240000,  696320 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_6_1,   8355840, 139264,  480000,  696320 },
+		{ V4L2_MPEG_VIDEO_H264_LEVEL_6_2,  16711680, 139264,  800000,  696320 },
+	};
+	s64 level = inst->capabilities->cap[LEVEL].value;
+	int cnt;
+
+	for (cnt = 0; cnt < ARRAY_SIZE(level_table); cnt++) {
+		if (frame_size <= level_table[cnt].max_frame_size * 256 &&
+		    target_bitrate <= level_table[cnt].max_bit_rate * 1000 &&
+		    dpb_size <= level_table[cnt].max_dpb_mbs * 256 &&
+		    samples_per_sec <= level_table[cnt].max_mbsps * 256)
+			break;
+	}
+
+	if (cnt == ARRAY_SIZE(level_table)) {
+		i_vpr_e(inst, "%s: failed. size %llu, samples/sec %llu, bitrate %llu\n",
+			__func__, frame_size, samples_per_sec, target_bitrate);
+		return level;
+	}
+
+	return level_table[cnt].level;
+}
+
+static s64 msm_vidc_adjust_h265_level_tier(struct msm_vidc_inst *inst, u64 frame_size,
+					   u64 samples_per_sec, u64 target_bitrate)
+{
+	static struct h265_level_table level_table[] = {
+	   /* level, max_mbsps, max_frame_size,  max_br_main_tier, max_br_high_tier*/
+		{ V4L2_MPEG_VIDEO_HEVC_LEVEL_1,        552960,     36864,     350,     350 },
+		{ V4L2_MPEG_VIDEO_HEVC_LEVEL_2,       3686400,    122880,    1500,    1500 },
+		{ V4L2_MPEG_VIDEO_HEVC_LEVEL_2_1,     7372800,    245760,    3000,    3000 },
+		{ V4L2_MPEG_VIDEO_HEVC_LEVEL_3,      16588800,    552960,    6000,    6000 },
+		{ V4L2_MPEG_VIDEO_HEVC_LEVEL_3_1,    33177600,    983040,   10000,   10000 },
+		{ V4L2_MPEG_VIDEO_HEVC_LEVEL_4,      66846720,   2228224,   12000,   30000 },
+		{ V4L2_MPEG_VIDEO_HEVC_LEVEL_4_1,   133693440,   2228224,   20000,   50000 },
+		{ V4L2_MPEG_VIDEO_HEVC_LEVEL_5,     267386880,   8912896,   25000,  100000 },
+		{ V4L2_MPEG_VIDEO_HEVC_LEVEL_5_1,   534773760,   8912896,   40000,  160000 },
+		{ V4L2_MPEG_VIDEO_HEVC_LEVEL_5_2,  1069547520,   8912896,   60000,  240000 },
+		{ V4L2_MPEG_VIDEO_HEVC_LEVEL_6,    1069547520,  35651584,   60000,  240000 },
+		{ V4L2_MPEG_VIDEO_HEVC_LEVEL_6_1,  2139095040,  35651584,  120000,  480000 },
+		{ V4L2_MPEG_VIDEO_HEVC_LEVEL_6_2,  4278190080,  35651584,  240000,  800000 },
+	};
+	s64 level = inst->capabilities->cap[LEVEL].value;
+	s64 tier_value = inst->capabilities->cap[HEVC_TIER].value;
+	int cnt;
+
+	for (cnt = 0; cnt < ARRAY_SIZE(level_table); cnt++) {
+		if (frame_size <= level_table[cnt].max_frame_size &&
+		    samples_per_sec <= level_table[cnt].max_mbsps) {
+			if (inst->capabilities->cap[HEVC_TIER].flags & CAP_FLAG_CLIENT_SET) {
+				if (tier_value == V4L2_MPEG_VIDEO_HEVC_TIER_MAIN &&
+				    target_bitrate <= level_table[cnt].max_br_main_tier * 1000)
+					break;
+				else if (tier_value == V4L2_MPEG_VIDEO_HEVC_TIER_HIGH &&
+					 target_bitrate <= level_table[cnt].max_br_high_tier * 1000)
+					break;
+			} else {
+				if (target_bitrate <= level_table[cnt].max_br_main_tier * 1000) {
+					tier_value = V4L2_MPEG_VIDEO_HEVC_TIER_MAIN;
+					break;
+				} else if (target_bitrate <=
+					 level_table[cnt].max_br_high_tier * 1000) {
+					tier_value = V4L2_MPEG_VIDEO_HEVC_TIER_HIGH;
+					break;
+				}
+			}
+		}
+	}
+
+	if (cnt == ARRAY_SIZE(level_table)) {
+		i_vpr_e(inst, "%s: failed. size %llu, samples/sec %llu, bitrate %llu\n",
+			__func__, frame_size, samples_per_sec, target_bitrate);
+		return level;
+	}
+
+	msm_vidc_update_cap_value(inst, HEVC_TIER, tier_value, __func__);
+
+	return level_table[cnt].level;
+}
+
+int msm_vidc_adjust_level_tier(void *instance, struct v4l2_ctrl *ctrl)
+{
+	struct msm_vidc_inst *inst = (struct msm_vidc_inst *)instance;
+	struct v4l2_format *f;
+	struct msm_vidc_core *core = inst->core;
+
+	u64 frame_size, frame_rate, samples_per_sec;
+	u64 width, height, num_ref_frames = 0, dpb_size = 0;
+	s32 bitrate, adjust_level;
+
+	f = &inst->fmts[OUTPUT_PORT];
+	width = f->fmt.pix_mp.width;
+	height = f->fmt.pix_mp.height;
+
+	frame_size = width * height;
+	frame_rate = inst->capabilities->cap[FRAME_RATE].value >> 16;
+	samples_per_sec = frame_size * frame_rate;
+
+	if (msm_vidc_get_parent_value(inst, LEVEL, BIT_RATE,
+				      &bitrate, __func__))
+		return -EINVAL;
+
+	adjust_level = inst->capabilities->cap[LEVEL].value;
+
+	if (inst->codec == MSM_VIDC_H264) {
+		num_ref_frames = call_session_op(core, min_count, inst, MSM_VIDC_BUF_DPB);
+		if (num_ref_frames)
+			dpb_size =  (num_ref_frames - 1) * frame_size;
+		else
+			dpb_size = frame_size;
+		adjust_level = msm_vidc_adjust_h264_level(inst, frame_size, samples_per_sec,
+							  dpb_size, bitrate);
+	} else if (inst->codec == MSM_VIDC_HEVC) {
+		adjust_level = msm_vidc_adjust_h265_level_tier(inst, frame_size, samples_per_sec,
+							       bitrate);
+	}
+
+	msm_vidc_update_cap_value(inst, LEVEL, adjust_level, __func__);
 
 	return 0;
 }
@@ -2301,7 +2446,7 @@ update_and_exit:
 	return 0;
 }
 
-int msm_vidc_adjust_lowlatency_mode(void *instance, struct v4l2_ctrl *ctrl)
+int msm_vidc_adjust_enc_lowlatency_mode(void *instance, struct v4l2_ctrl *ctrl)
 {
 	struct msm_vidc_inst_capability *capability;
 	s32 adjusted_value;
@@ -3436,6 +3581,7 @@ static int msm_venc_set_csc_coeff(struct msm_vidc_inst *inst,
 
 	return rc;
 }
+
 int msm_vidc_set_csc_custom_matrix(void *instance,
 	enum msm_vidc_inst_capability_type cap_id)
 {
@@ -3544,8 +3690,7 @@ int msm_vidc_set_level(void *instance,
 	}
 
 	hfi_value = inst->capabilities->cap[cap_id].value;
-	if (!(inst->capabilities->cap[cap_id].flags & CAP_FLAG_CLIENT_SET))
-		hfi_value = HFI_LEVEL_NONE;
+
 
 	rc = msm_vidc_packetize_control(inst, cap_id, HFI_PAYLOAD_U32_ENUM,
 		&hfi_value, sizeof(u32), __func__);
@@ -3910,6 +4055,81 @@ int msm_vidc_set_vui_timing_info(void *instance,
 		hfi_value = 1;
 
 	rc = msm_vidc_packetize_control(inst, cap_id, HFI_PAYLOAD_U32,
+		&hfi_value, sizeof(u32), __func__);
+	if (rc)
+		return rc;
+
+	return rc;
+}
+
+int msm_vidc_set_signal_color_info(void *instance,
+		enum msm_vidc_inst_capability_type cap_id) {
+
+	int rc = 0;
+	struct msm_vidc_inst *inst = (struct msm_vidc_inst *)instance;
+	struct msm_vidc_inst_capability *capability;
+	u32 color_info, matrix_coeff, transfer_char, primaries, range;
+	u32 full_range = 0;
+	u32 colour_description_present_flag = 0;
+	u32 video_signal_type_present_flag = 0, hfi_value = 0;
+	struct v4l2_format *input_fmt;
+	u32 pix_fmt;
+	/* Unspecified video format */
+	u32 video_format = 5;
+
+	if (!inst || !inst->capabilities) {
+		d_vpr_e("%s: invalid params\n", __func__);
+		return -EINVAL;
+	}
+	capability = inst->capabilities;
+
+	if (!(capability->cap[cap_id].flags & CAP_FLAG_CLIENT_SET)) {
+		i_vpr_h(inst, "%s: colorspace not configured via control\n", __func__);
+		return 0;
+	}
+
+	color_info = capability->cap[cap_id].value;
+	matrix_coeff = color_info & 0xFF;
+	transfer_char = (color_info & 0xFF00) >> 8;
+	primaries = (color_info & 0xFF0000) >> 16;
+	range = (color_info & 0xFF000000) >> 24;
+
+	input_fmt = &inst->fmts[INPUT_PORT];
+	pix_fmt = v4l2_colorformat_to_driver(input_fmt->fmt.pix_mp.pixelformat, __func__);
+	if (primaries != V4L2_COLORSPACE_DEFAULT ||
+	    matrix_coeff != V4L2_YCBCR_ENC_DEFAULT ||
+	    transfer_char != V4L2_XFER_FUNC_DEFAULT) {
+		colour_description_present_flag = 1;
+		video_signal_type_present_flag = 1;
+		primaries = v4l2_color_primaries_to_driver(inst,
+			primaries, __func__);
+		matrix_coeff = v4l2_matrix_coeff_to_driver(inst,
+			matrix_coeff, __func__);
+		transfer_char = v4l2_transfer_char_to_driver(inst,
+			transfer_char, __func__);
+	} else if (is_rgba_colorformat(pix_fmt)) {
+		colour_description_present_flag = 1;
+		video_signal_type_present_flag = 1;
+		primaries = MSM_VIDC_PRIMARIES_BT709;
+		matrix_coeff = MSM_VIDC_MATRIX_COEFF_BT709;
+		transfer_char = MSM_VIDC_TRANSFER_BT709;
+		full_range = 0;
+	}
+
+	if (range != V4L2_QUANTIZATION_DEFAULT) {
+		video_signal_type_present_flag = 1;
+		full_range = range == V4L2_QUANTIZATION_FULL_RANGE ? 1 : 0;
+	}
+
+	hfi_value = (matrix_coeff & 0xFF) |
+		((transfer_char << 8) & 0xFF00) |
+		((primaries << 16) & 0xFF0000) |
+		((colour_description_present_flag << 24) & 0x1000000) |
+		((full_range << 25) & 0x2000000) |
+		((video_format << 26) & 0x1C000000) |
+		((video_signal_type_present_flag << 29) & 0x20000000);
+
+	rc = msm_vidc_packetize_control(inst, cap_id, HFI_PAYLOAD_32_PACKED,
 		&hfi_value, sizeof(u32), __func__);
 	if (rc)
 		return rc;

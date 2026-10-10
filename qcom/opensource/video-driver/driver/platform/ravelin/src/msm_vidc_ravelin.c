@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2022,2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/of.h>
@@ -63,7 +63,7 @@ static struct msm_platform_core_capability core_data_ravelin[] = {
 	{MAX_ENH_LAYER_COUNT, 5},
 	{NUM_VPP_PIPE, 1},
 	{SW_PC, 1},
-	{FW_UNLOAD, 0},
+	{FW_UNLOAD, 1},
 	{HW_RESPONSE_TIMEOUT, HW_RESPONSE_TIMEOUT_VALUE}, /* 1000 ms */
 	{SW_PC_DELAY,         SW_PC_DELAY_VALUE        }, /* 1500 ms (>HW_RESPONSE_TIMEOUT)*/
 	{FW_UNLOAD_DELAY,     FW_UNLOAD_DELAY_VALUE    }, /* 3000 ms (>SW_PC_DELAY)*/
@@ -176,7 +176,7 @@ static struct msm_platform_inst_capability instance_data_ravelin[] = {
 		0,
 		HFI_PROP_FRAME_RATE,
 		CAP_FLAG_ROOT | CAP_FLAG_OUTPUT_PORT,
-		{0}, {0},
+		{0}, {LEVEL},
 		NULL, msm_vidc_set_q16},
 
 	{FRAME_RATE, DEC, CODECS_ALL,
@@ -211,33 +211,6 @@ static struct msm_platform_inst_capability instance_data_ravelin[] = {
 	{CLIENT_ID, ENC|DEC, CODECS_ALL,
 		INVALID_CLIENT_ID, INT_MAX, 1, INVALID_CLIENT_ID,
 		V4L2_CID_MPEG_VIDC_CLIENT_ID},
-
-	/*
-	 * Client will enable V4L2_CID_MPEG_VIDC_METADATA_OUTBUF_FENCE
-	 * to get fence_id in input metadata buffer done.
-	 */
-	{META_OUTBUF_FENCE, DEC, H264|HEVC|VP9,
-		V4L2_MPEG_MSM_VIDC_DISABLE, V4L2_MPEG_MSM_VIDC_ENABLE,
-		1, V4L2_MPEG_MSM_VIDC_DISABLE,
-		V4L2_CID_MPEG_VIDC_METADATA_OUTBUF_FENCE,
-		HFI_PROP_FENCE,
-		CAP_FLAG_NONE,
-		{OUTPUT_ORDER}},
-
-	/*
-	 * Client to do set_ctrl with FENCE_ID to set fence_id
-	 * and then client will do get_ctrl with FENCE_FD to get
-	 * fence_fd corresponding to client set fence_id.
-	 */
-	{FENCE_ID, DEC, CODECS_ALL,
-		0, INT_MAX, 1, 0,
-		V4L2_CID_MPEG_VIDC_SW_FENCE_ID,
-		0,
-		CAP_FLAG_DYNAMIC_ALLOWED | CAP_FLAG_OUTPUT_PORT},
-
-	{FENCE_FD, DEC, CODECS_ALL,
-		INVALID_FD, INT_MAX, 1, INVALID_FD,
-		V4L2_CID_MPEG_VIDC_SW_FENCE_FD},
 
 	{TS_REORDER, DEC, H264|HEVC,
 		V4L2_MPEG_MSM_VIDC_DISABLE, V4L2_MPEG_MSM_VIDC_ENABLE,
@@ -361,7 +334,7 @@ static struct msm_platform_inst_capability instance_data_ravelin[] = {
 		CAP_FLAG_OUTPUT_PORT|CAP_FLAG_INPUT_PORT|
 			CAP_FLAG_DYNAMIC_ALLOWED,
 		{ENH_LAYER_COUNT, BITRATE_MODE},
-		{PEAK_BITRATE},
+		{PEAK_BITRATE, LEVEL},
 		msm_vidc_adjust_bitrate, msm_vidc_set_bitrate},
 
 	{BITRATE_MODE, ENC, H264,
@@ -498,16 +471,14 @@ static struct msm_platform_inst_capability instance_data_ravelin[] = {
 		CAP_FLAG_NONE,
 		{BITRATE_MODE},
 		{STAGE},
-		msm_vidc_adjust_lowlatency_mode, NULL},
+		msm_vidc_adjust_enc_lowlatency_mode, NULL},
 
 	{LOWLATENCY_MODE, DEC, H264|HEVC|VP9,
 		V4L2_MPEG_MSM_VIDC_DISABLE, V4L2_MPEG_MSM_VIDC_ENABLE,
 		1, V4L2_MPEG_MSM_VIDC_DISABLE,
 		V4L2_CID_MPEG_VIDC_LOWLATENCY_REQUEST,
 		HFI_PROP_SEQ_CHANGE_AT_SYNC_FRAME,
-		CAP_FLAG_INPUT_PORT,
-		{0},
-		{STAGE}},
+		CAP_FLAG_INPUT_PORT},
 
 	{LTR_COUNT, ENC, H264|HEVC,
 		0, 2, 1, 0,
@@ -587,7 +558,7 @@ static struct msm_platform_inst_capability instance_data_ravelin[] = {
 		HFI_PROP_BITRATE_BOOST,
 		CAP_FLAG_OUTPUT_PORT,
 		{BITRATE_MODE, MIN_QUALITY},
-		{0},
+		{LEVEL},
 		msm_vidc_adjust_bitrate_boost,
 		msm_vidc_set_vbr_related_properties},
 
@@ -765,14 +736,18 @@ static struct msm_platform_inst_capability instance_data_ravelin[] = {
 		V4L2_MPEG_VIDEO_H264_HIERARCHICAL_CODING_P,
 		V4L2_CID_MPEG_VIDEO_H264_HIERARCHICAL_CODING_TYPE,
 		HFI_PROP_LAYER_ENCODING_TYPE,
-		CAP_FLAG_OUTPUT_PORT|CAP_FLAG_MENU},
+		CAP_FLAG_OUTPUT_PORT|CAP_FLAG_MENU,
+		{0}, {LEVEL}
+		},
 
 	{LAYER_ENABLE, ENC, H264,
 		V4L2_MPEG_MSM_VIDC_DISABLE, V4L2_MPEG_MSM_VIDC_ENABLE,
 		1, V4L2_MPEG_MSM_VIDC_DISABLE,
 		V4L2_CID_MPEG_VIDEO_H264_HIERARCHICAL_CODING,
 		HFI_PROP_LAYER_ENCODING_TYPE,
-		CAP_FLAG_OUTPUT_PORT},
+		CAP_FLAG_OUTPUT_PORT,
+		{0}, {LEVEL}
+		},
 
 	{ENH_LAYER_COUNT, ENC, HEVC,
 		0, 5, 1, 0,
@@ -791,7 +766,7 @@ static struct msm_platform_inst_capability instance_data_ravelin[] = {
 		CAP_FLAG_OUTPUT_PORT|CAP_FLAG_INPUT_PORT|
 			CAP_FLAG_DYNAMIC_ALLOWED,
 		{BITRATE_MODE, META_EVA_STATS},
-		{GOP_SIZE, B_FRAME, BIT_RATE, MIN_QUALITY},
+		{GOP_SIZE, B_FRAME, BIT_RATE, MIN_QUALITY, LEVEL},
 		msm_vidc_adjust_layer_count, msm_vidc_set_layer_count_and_type},
 
 	/*
@@ -1064,9 +1039,9 @@ static struct msm_platform_inst_capability instance_data_ravelin[] = {
 		V4L2_CID_MPEG_VIDEO_H264_LEVEL,
 		HFI_PROP_LEVEL,
 		CAP_FLAG_ROOT | CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU,
+		{BIT_RATE},
 		{0},
-		{0},
-		NULL, msm_vidc_set_level},
+		msm_vidc_adjust_level_tier, msm_vidc_set_level},
 
 	{LEVEL, DEC, HEVC|HEIC,
 		V4L2_MPEG_VIDEO_HEVC_LEVEL_1,
@@ -1100,9 +1075,9 @@ static struct msm_platform_inst_capability instance_data_ravelin[] = {
 		V4L2_CID_MPEG_VIDEO_HEVC_LEVEL,
 		HFI_PROP_LEVEL,
 		CAP_FLAG_ROOT | CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU,
+		{BIT_RATE},
 		{0},
-		{0},
-		NULL, msm_vidc_set_level},
+		msm_vidc_adjust_level_tier, msm_vidc_set_level},
 
 	/* TODO: Bring the VP9 Level upstream GKI change, and level cap here:
 	 *	go/videogki
@@ -1213,32 +1188,13 @@ static struct msm_platform_inst_capability instance_data_ravelin[] = {
 		1, V4L2_MPEG_MSM_VIDC_DISABLE,
 		V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY_ENABLE,
 		HFI_PROP_DECODE_ORDER_OUTPUT,
-		CAP_FLAG_ROOT | CAP_FLAG_INPUT_PORT,
-		{0},
-		{OUTPUT_ORDER},
-		NULL,
-		NULL},
+		CAP_FLAG_ROOT | CAP_FLAG_INPUT_PORT},
 
 	{DISPLAY_DELAY, DEC, H264|HEVC|VP9,
 		0, 1, 1, 0,
 		V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY,
 		HFI_PROP_DECODE_ORDER_OUTPUT,
-		CAP_FLAG_ROOT | CAP_FLAG_INPUT_PORT,
-		{0},
-		{OUTPUT_ORDER},
-		NULL,
-		NULL},
-
-	 {OUTPUT_ORDER, DEC, H264|HEVC|VP9,
-		V4L2_MPEG_MSM_VIDC_DISABLE, V4L2_MPEG_MSM_VIDC_ENABLE,
-		1, V4L2_MPEG_MSM_VIDC_DISABLE,
-		0,
-		HFI_PROP_DECODE_ORDER_OUTPUT,
-		CAP_FLAG_ROOT | CAP_FLAG_INPUT_PORT,
-		{THUMBNAIL_MODE, DISPLAY_DELAY, DISPLAY_DELAY_ENABLE},
-		{META_OUTBUF_FENCE},
-		msm_vidc_adjust_output_order,
-		msm_vidc_set_u32},
+		CAP_FLAG_ROOT | CAP_FLAG_INPUT_PORT},
 
 	/* conceal color */
 	{CONCEAL_COLOR_8BIT, DEC, CODECS_ALL, 0x0, 0xff3fcff, 1,
@@ -1274,10 +1230,7 @@ static struct msm_platform_inst_capability instance_data_ravelin[] = {
 		MSM_VIDC_PIPE_NONE,
 		0},
 
-	{POC, DEC, H264,
-		0, 2, 1, 1,
-		0,
-		HFI_PROP_PIC_ORDER_CNT_TYPE},
+	{POC, DEC, H264, 0, 18, 1, 1},
 
 	{QUALITY_MODE, ENC, CODECS_ALL,
 		MSM_VIDC_MAX_QUALITY_MODE,
@@ -1305,12 +1258,7 @@ static struct msm_platform_inst_capability instance_data_ravelin[] = {
 		V4L2_MPEG_MSM_VIDC_DISABLE, V4L2_MPEG_MSM_VIDC_ENABLE,
 		1, V4L2_MPEG_MSM_VIDC_DISABLE,
 		V4L2_CID_MPEG_VIDC_THUMBNAIL_MODE,
-		HFI_PROP_THUMBNAIL_MODE,
-		CAP_FLAG_NONE,
-		{0},
-		{OUTPUT_ORDER},
-		NULL,
-		msm_vidc_set_u32},
+		HFI_PROP_THUMBNAIL_MODE},
 
 	{DEFAULT_HEADER, DEC, CODECS_ALL,
 		V4L2_MPEG_MSM_VIDC_DISABLE, V4L2_MPEG_MSM_VIDC_ENABLE,
@@ -1414,13 +1362,6 @@ static struct msm_platform_inst_capability instance_data_ravelin[] = {
 		1, V4L2_MPEG_MSM_VIDC_DISABLE,
 		V4L2_CID_MPEG_VIDC_METADATA_HISTOGRAM_INFO,
 		0},
-
-	{META_PICTURE_TYPE, DEC, CODECS_ALL,
-		V4L2_MPEG_MSM_VIDC_DISABLE,
-		V4L2_MPEG_MSM_VIDC_ENABLE,
-		1, V4L2_MPEG_MSM_VIDC_DISABLE,
-		V4L2_CID_MPEG_VIDC_METADATA_PICTURE_TYPE,
-		HFI_PROP_PICTURE_TYPE},
 
 	{META_SEI_MASTERING_DISP, DEC|ENC, HEVC|HEIC,
 		V4L2_MPEG_MSM_VIDC_DISABLE, V4L2_MPEG_MSM_VIDC_DISABLE,
@@ -1598,6 +1539,16 @@ static struct msm_platform_inst_capability instance_data_ravelin[] = {
 		0, 100,
 		1, 100,
 		V4L2_CID_MPEG_VIDC_VENC_COMPLEXITY},
+	{SIGNAL_COLOR_INFO, ENC, CODECS_ALL,
+		0, INT_MAX, 1, 0,
+		V4L2_CID_MPEG_VIDC_SIGNAL_COLOR_INFO,
+		HFI_PROP_SIGNAL_COLOR_INFO,
+		CAP_FLAG_INPUT_PORT | CAP_FLAG_DYNAMIC_ALLOWED | CAP_FLAG_ROOT,
+		{0},
+		{0},
+		NULL,
+		msm_vidc_set_signal_color_info
+	},
 	{META_MAX_NUM_REORDER_FRAMES, DEC, HEVC|H264,
 		V4L2_MPEG_MSM_VIDC_DISABLE, V4L2_MPEG_MSM_VIDC_ENABLE,
 		1, V4L2_MPEG_MSM_VIDC_DISABLE,
