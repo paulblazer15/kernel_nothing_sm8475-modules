@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #include <linux/platform_device.h>
 #include <linux/slab.h>
@@ -9,7 +10,7 @@
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/soc.h>
-#include <linux/soc/qcom/msm_ext_display.h>
+#include <msm_ext_display.h>
 
 #define DRV_NAME "HDMI_codec"
 
@@ -58,6 +59,17 @@ static const char *const ext_disp_audio_type_text[] = {"None", "HDMI", "DP"};
 static const char *const ext_disp_audio_ack_text[] = {"Disconnect",  "Connect",
 						      "Ack_Enable"};
 
+static const struct snd_pcm_hardware dummy_dma_hardware = {
+	/* Random values to keep userspace happy when checking constraints */
+	.info               = SNDRV_PCM_INFO_INTERLEAVED |
+					SNDRV_PCM_INFO_BLOCK_TRANSFER,
+	.buffer_bytes_max   = 128*1024,
+	.period_bytes_min   = PAGE_SIZE,
+	.period_bytes_max   = PAGE_SIZE*2,
+	.periods_min        = 2,
+	.periods_max        = 128,
+};
+
 SOC_EXT_DISP_AUDIO_TYPE(1);
 SOC_EXT_DISP_AUDIO_ACK_STATE(1);
 SOC_EXT_DISP_AUDIO_TYPE(2);
@@ -73,6 +85,24 @@ struct msm_ext_disp_audio_codec_rx_data {
 	int stream[DP_DAI_MAX];
 	int ctl[DP_DAI_MAX];
 };
+
+struct msm_ext_disp_device_mxr_ctl {
+	unsigned int dai_idx;
+	struct soc_bytes_ext bytes_ext;
+};
+
+#define MSM_EXT_DISP_DEVICE_CTRL_VALS_SIZE (sizeof(long) * 2)
+
+#define MSM_EXT_DISP_SOC_MULTI_EXT(xname, xdai_id) \
+{   .iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = xname, \
+	.info = msm_ext_disp_device_ctl_info, \
+	.get = msm_ext_disp_audio_device_get, \
+	.put = msm_ext_disp_audio_device_set, \
+	.private_value = (unsigned long)&(struct msm_ext_disp_device_mxr_ctl) { \
+		.dai_idx = xdai_id, \
+		.bytes_ext = {.max = MSM_EXT_DISP_DEVICE_CTRL_VALS_SIZE, }, \
+	} \
+}
 
 static int msm_ext_disp_edid_ctl_info(struct snd_kcontrol *kcontrol,
 			struct snd_ctl_elem_info *uinfo)
@@ -356,15 +386,25 @@ err:
 	return rc;
 }
 
+static int msm_ext_disp_device_ctl_info(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_info *ucontrol)
+{
+	ucontrol->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	ucontrol->count = 2;
+
+	return 0;
+}
+
 static int msm_ext_disp_audio_device_get(struct snd_kcontrol *kcontrol,
 				      struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_component *component =
 			snd_soc_kcontrol_component(kcontrol);
+	struct msm_ext_disp_device_mxr_ctl *ctl =
+		(struct msm_ext_disp_device_mxr_ctl *)kcontrol->private_value;
 	struct msm_ext_disp_audio_codec_rx_data *codec_data;
 	int rc = 0;
-	int dai_id = ((struct soc_multi_mixer_control *)
-				kcontrol->private_value)->shift;
+	int dai_id = ctl->dai_idx;
 
 	if (dai_id < 0 || dai_id > DP_DAI2) {
 		dev_err(component->dev,
@@ -395,8 +435,9 @@ static int msm_ext_disp_audio_device_set(struct snd_kcontrol *kcontrol,
 			snd_soc_kcontrol_component(kcontrol);
 	struct msm_ext_disp_audio_codec_rx_data *codec_data;
 	int rc = 0;
-	int dai_id = ((struct soc_multi_mixer_control *)
-				kcontrol->private_value)->shift;
+	struct msm_ext_disp_device_mxr_ctl *ctl =
+		(struct msm_ext_disp_device_mxr_ctl *)kcontrol->private_value;
+	int dai_id = ctl->dai_idx;
 
 	if (dai_id < 0 || dai_id > DP_DAI2) {
 		dev_err(component->dev,
@@ -490,18 +531,9 @@ static const struct snd_kcontrol_new msm_ext_disp_codec_rx_controls[] = {
 		     ext_disp_audio_ack_state3,
 		     NULL, msm_ext_disp_audio_ack_set),
 
-	SOC_SINGLE_MULTI_EXT("External Display Audio Device",
-			SND_SOC_NOPM, DP_DAI1, DP_STREAM_MAX - 1, 0, 2,
-			msm_ext_disp_audio_device_get,
-			msm_ext_disp_audio_device_set),
-	SOC_SINGLE_MULTI_EXT("External Display1 Audio Device",
-			SND_SOC_NOPM, DP_DAI2, DP_STREAM_MAX - 1, 0, 2,
-			msm_ext_disp_audio_device_get,
-			msm_ext_disp_audio_device_set),
-	SOC_SINGLE_MULTI_EXT("External HDMI Device",
-			SND_SOC_NOPM, HDMI_MS_DAI, DP_STREAM_MAX - 1, 0, 2,
-			msm_ext_disp_audio_device_get,
-			msm_ext_disp_audio_device_set),
+	MSM_EXT_DISP_SOC_MULTI_EXT("External Display Audio Device", DP_DAI1),
+	MSM_EXT_DISP_SOC_MULTI_EXT("External Display1 Audio Device", DP_DAI2),
+	MSM_EXT_DISP_SOC_MULTI_EXT("External HDMI Device", HDMI_MS_DAI),
 
 };
 
@@ -514,12 +546,16 @@ static int msm_ext_disp_audio_codec_rx_dai_startup(
 	struct msm_ext_disp_audio_codec_rx_data *codec_data =
 			dev_get_drvdata(dai->component->dev);
 	int type;
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 
 	if (!codec_data) {
 		dev_err(dai->dev, "%s() codec_data is null\n",
 			__func__);
 		return -EINVAL;
 	}
+
+	if (!rtd->dai_link->no_pcm)
+		snd_soc_set_runtime_hwparams(substream, &dummy_dma_hardware);
 
 	dev_dbg(dai->component->dev, "%s: DP ctl id %d Stream id %d\n",
 		__func__,
