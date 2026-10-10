@@ -18,6 +18,14 @@ ifeq ($(call is-board-platform-in-list, $(GSI_DLKM_PLATFORMS_LIST)),true)
 BOARD_COMMON_DIR ?= device/qcom/common
 DLKM_DIR := $(TOP)/$(BOARD_COMMON_DIR)/dlkm
 LOCAL_PATH := $(call my-dir)
+
+ifeq ($(TARGET_DATARMNET_EXT_ENABLE), true)
+DATAIPA_RMNET_MEM_SYMVERS := $(shell pwd)/$(call intermediates-dir-for,DLKM,rmnet-mem-module-symvers)/Module.symvers
+KBUILD_OPTIONS += KBUILD_EXTRA_SYMBOLS=$(DATAIPA_RMNET_MEM_SYMVERS)
+DATAIPA_REQUIRED_MODULES := rmnet-mem-module-symvers
+DATAIPA_ADDITIONAL_DEPENDENCIES := $(call intermediates-dir-for,DLKM,rmnet-mem-module-symvers)/Module.symvers
+endif
+
 include $(CLEAR_VARS)
 
 LOCAL_CFLAGS := -Wno-macro-redefined -Wno-unused-function -Wall -Werror
@@ -30,6 +38,8 @@ LOCAL_MODULE              := gsim.ko
 LOCAL_MODULE_KBUILD_NAME  := gsi/gsim.ko
 LOCAL_MODULE_DEBUG_ENABLE := true
 LOCAL_MODULE_PATH := $(KERNEL_MODULES_OUT)
+LOCAL_REQUIRED_MODULES := $(DATAIPA_REQUIRED_MODULES)
+LOCAL_ADDITIONAL_DEPENDENCIES := $(DATAIPA_ADDITIONAL_DEPENDENCIES)
 $(warning $(DLKM_DIR))
 include $(DLKM_DIR)/Build_external_kernelmodule.mk
 
@@ -43,6 +53,8 @@ LOCAL_MODULE_DEBUG_ENABLE := true
 LOCAL_EXPORT_KO_INCLUDE_DIRS    := $(LOCAL_PATH)/include
 LOCAL_EXPORT_KO_INCLUDE_DIRS    += $(LOCAL_PATH)/include/uapi
 LOCAL_MODULE_PATH := $(KERNEL_MODULES_OUT)
+LOCAL_REQUIRED_MODULES := $(DATAIPA_REQUIRED_MODULES)
+LOCAL_ADDITIONAL_DEPENDENCIES := $(DATAIPA_ADDITIONAL_DEPENDENCIES)
 $(warning $(DLKM_DIR))
 include $(DLKM_DIR)/Build_external_kernelmodule.mk
 
@@ -53,6 +65,8 @@ LOCAL_MODULE              := ipanetm.ko
 LOCAL_MODULE_KBUILD_NAME  := ipa/ipanetm.ko
 LOCAL_MODULE_DEBUG_ENABLE := true
 LOCAL_MODULE_PATH := $(KERNEL_MODULES_OUT)
+LOCAL_REQUIRED_MODULES := $(DATAIPA_REQUIRED_MODULES)
+LOCAL_ADDITIONAL_DEPENDENCIES := $(DATAIPA_ADDITIONAL_DEPENDENCIES)
 $(warning $(DLKM_DIR))
 include $(DLKM_DIR)/Build_external_kernelmodule.mk
 
@@ -65,6 +79,8 @@ LOCAL_MODULE_KBUILD_NAME  := ipa/ipatestm.ko
 LOCAL_MODULE_DEBUG_ENABLE := true
 LOCAL_HEADER_LIBRARIES    := ipa_test_kernel_headers
 LOCAL_MODULE_PATH := $(KERNEL_MODULES_OUT)
+LOCAL_REQUIRED_MODULES := $(DATAIPA_REQUIRED_MODULES)
+LOCAL_ADDITIONAL_DEPENDENCIES := $(DATAIPA_ADDITIONAL_DEPENDENCIES)
 $(warning $(DLKM_DIR))
 include $(DLKM_DIR)/Build_external_kernelmodule.mk
 endif
