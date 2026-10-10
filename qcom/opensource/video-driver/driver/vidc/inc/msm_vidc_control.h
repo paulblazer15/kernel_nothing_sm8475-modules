@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2020-2021,, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022,2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _MSM_VIDC_CONTROL_H_
@@ -10,6 +10,22 @@
 #include <media/v4l2_vidc_extensions.h>
 #include "msm_vidc_inst.h"
 #include "msm_vidc_internal.h"
+
+struct h264_level_table {
+	u64 level;
+	u64 max_mbsps;
+	u64 max_frame_size;
+	u64 max_bit_rate;
+	u64 max_dpb_mbs;
+};
+
+struct h265_level_table {
+	u64 level;
+	u64 max_mbsps;
+	u64 max_frame_size;
+	u64 max_br_main_tier;
+	u64 max_br_high_tier;
+};
 
 int msm_vidc_ctrl_handler_init(struct msm_vidc_inst *inst, bool init);
 int msm_vidc_ctrl_handler_deinit(struct msm_vidc_inst *inst);
@@ -20,6 +36,7 @@ int msm_vidc_adjust_dynamic_layer_bitrate(void *instance, struct v4l2_ctrl *ctrl
 int msm_vidc_adjust_bitrate_mode(void *instance, struct v4l2_ctrl *ctrl);
 int msm_vidc_adjust_entropy_mode(void *instance, struct v4l2_ctrl *ctrl);
 int msm_vidc_adjust_profile(void *instance, struct v4l2_ctrl *ctrl);
+int msm_vidc_adjust_level_tier(void *instance, struct v4l2_ctrl *ctrl);
 int msm_vidc_adjust_ltr_count(void *instance, struct v4l2_ctrl *ctrl);
 int msm_vidc_adjust_use_ltr(void *instance, struct v4l2_ctrl *ctrl);
 int msm_vidc_adjust_mark_ltr(void *instance, struct v4l2_ctrl *ctrl);
@@ -43,7 +60,7 @@ int msm_vidc_adjust_blur_resolution(void *instance, struct v4l2_ctrl *ctrl);
 int msm_vidc_adjust_cac(void *instance, struct v4l2_ctrl *ctrl);
 int msm_vidc_adjust_bitrate_boost(void *instance, struct v4l2_ctrl *ctrl);
 int msm_vidc_adjust_min_quality(void *instance, struct v4l2_ctrl *ctrl);
-int msm_vidc_adjust_lowlatency_mode(void *instance, struct v4l2_ctrl *ctrl);
+int msm_vidc_adjust_enc_lowlatency_mode(void *instance, struct v4l2_ctrl *ctrl);
 int msm_vidc_adjust_dec_outbuf_fence(void *instance, struct v4l2_ctrl *ctrl);
 int msm_vidc_adjust_output_order(void *instance, struct v4l2_ctrl *ctrl);
 int msm_vidc_adjust_v4l2_properties(struct msm_vidc_inst *inst);
@@ -120,5 +137,7 @@ int msm_vidc_update_cap_value(struct msm_vidc_inst *inst, u32 cap,
 	s32 adjusted_val, const char *func);
 int msm_vidc_set_vui_timing_info(void *instance,
 	enum msm_vidc_inst_capability_type cap_id);
+int msm_vidc_set_signal_color_info(void *instance,
+		enum msm_vidc_inst_capability_type cap_id);
 
 #endif

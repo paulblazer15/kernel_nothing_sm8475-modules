@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/types.h>
@@ -113,16 +113,16 @@ int msm_vidc_querycap(void *instance, struct v4l2_capability *cap)
 		return -EINVAL;
 	}
 
-	strlcpy(cap->driver, MSM_VIDC_DRV_NAME, sizeof(cap->driver));
-	strlcpy(cap->bus_info, MSM_VIDC_BUS_NAME, sizeof(cap->bus_info));
+	strscpy(cap->driver, MSM_VIDC_DRV_NAME, sizeof(cap->driver));
+	strscpy(cap->bus_info, MSM_VIDC_BUS_NAME, sizeof(cap->bus_info));
 	cap->version = MSM_VIDC_VERSION;
 
 	memset(cap->reserved, 0, sizeof(cap->reserved));
 
 	if (inst->domain == MSM_VIDC_DECODER)
-		strlcpy(cap->card, "msm_vidc_decoder", sizeof(cap->card));
+		strscpy(cap->card, "msm_vidc_decoder", sizeof(cap->card));
 	else if (inst->domain == MSM_VIDC_ENCODER)
-		strlcpy(cap->card, "msm_vidc_encoder", sizeof(cap->card));
+		strscpy(cap->card, "msm_vidc_encoder", sizeof(cap->card));
 	else
 		return -EINVAL;
 
@@ -209,7 +209,7 @@ int msm_vidc_query_menu(void *instance, struct v4l2_querymenu *qmenu)
 		rc = -EINVAL;
 
 	i_vpr_h(inst,
-		"%s: ctrl: %s: min %lld, max %lld, menu_skip_mask %#x, qmenu: id %u, index %d, %s\n",
+		"%s: ctrl: %s: min %lld, max %lld, menu_skip_mask %lld, qmenu: id %u, index %d, %s\n",
 		__func__, ctrl->name, ctrl->minimum, ctrl->maximum,
 		ctrl->menu_skip_mask, qmenu->id, qmenu->index,
 		rc ? "not supported" : "supported");
@@ -847,11 +847,15 @@ void *msm_vidc_open(void *vidc_core, u32 session_type)
 	msm_vidc_update_debug_str(inst);
 	i_vpr_h(inst, "Opening video instance: %d\n", session_type);
 
+	rc = msm_vidc_vmem_alloc(sizeof(struct msm_vidc_inst_capability),
+		(void **)&inst->capabilities, "inst capability");
+	if (rc)
+		goto free_inst;
+
 	rc = msm_memory_pools_init(inst);
 	if (rc) {
 		i_vpr_e(inst, "%s: failed to init pool buffers\n", __func__);
-		msm_vidc_vmem_free((void **)&inst);
-		return NULL;
+		goto free_capabilities;
 	}
 	INIT_LIST_HEAD(&inst->response_works);
 	INIT_LIST_HEAD(&inst->timestamps.list);
@@ -901,17 +905,12 @@ void *msm_vidc_open(void *vidc_core, u32 session_type)
 	inst->response_workq = create_singlethread_workqueue("response_workq");
 	if (!inst->response_workq) {
 		i_vpr_e(inst, "%s: create input_psc_workq failed\n", __func__);
-		goto error;
+		goto deinit_pools;
 	}
 
 	INIT_DELAYED_WORK(&inst->response_work, handle_session_response_work_handler);
 	INIT_DELAYED_WORK(&inst->stats_work, msm_vidc_stats_handler);
 	INIT_WORK(&inst->stability_work, msm_vidc_stability_handler);
-
-	rc = msm_vidc_vmem_alloc(sizeof(struct msm_vidc_inst_capability),
-		(void **)&inst->capabilities, "inst capability");
-	if (rc)
-		goto error;
 
 	if (is_decode_session(inst))
 		rc = msm_vdec_inst_init(inst);
@@ -954,6 +953,14 @@ void *msm_vidc_open(void *vidc_core, u32 session_type)
 
 error:
 	msm_vidc_close(inst);
+	return NULL;
+
+deinit_pools:
+	msm_memory_pools_deinit(inst);
+free_capabilities:
+	msm_vidc_vmem_free((void **)&inst->capabilities);
+free_inst:
+	msm_vidc_vmem_free((void **)&inst);
 	return NULL;
 }
 EXPORT_SYMBOL(msm_vidc_open);

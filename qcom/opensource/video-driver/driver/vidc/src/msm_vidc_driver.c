@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2020-2022 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2020-2022, The Linux Foundation. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/iommu.h>
@@ -202,6 +202,7 @@ static const struct msm_vidc_cap_name cap_name_arr[] = {
 	{META_DEC_QP_METADATA,           "META_DEC_QP_METADATA"       },
 	{COMPLEXITY,                     "COMPLEXITY"                 },
 	{META_MAX_NUM_REORDER_FRAMES,    "META_MAX_NUM_REORDER_FRAMES"},
+	{SIGNAL_COLOR_INFO,              "SIGNAL_COLOR_INFO"          },
 	{INST_CAP_MAX,                   "INST_CAP_MAX"               },
 };
 
@@ -1499,6 +1500,7 @@ bool msm_vidc_allow_s_ctrl(struct msm_vidc_inst *inst, u32 id)
 			case V4L2_CID_MPEG_VIDC_ENC_INPUT_COMPRESSION_RATIO:
 			case V4L2_CID_MPEG_VIDEO_BITRATE_PEAK:
 			case V4L2_CID_MPEG_VIDC_PRIORITY:
+			case V4L2_CID_MPEG_VIDC_SIGNAL_COLOR_INFO:
 				allow = true;
 				break;
 			default:
@@ -2242,6 +2244,15 @@ int msm_vidc_get_control(struct msm_vidc_inst *inst, struct v4l2_ctrl *ctrl)
 		if (!rc)
 			i_vpr_l(inst, "%s: fence fd: %d\n", __func__, ctrl->val);
 		break;
+	case V4L2_CID_MPEG_VIDEO_H264_LEVEL:
+	case V4L2_CID_MPEG_VIDEO_HEVC_LEVEL:
+		ctrl->val = inst->capabilities->cap[LEVEL].value;
+		i_vpr_h(inst, "%s: level: %d\n", __func__, ctrl->val);
+		break;
+	case V4L2_CID_MPEG_VIDEO_HEVC_TIER:
+		ctrl->val = inst->capabilities->cap[HEVC_TIER].value;
+		i_vpr_h(inst, "%s: hevc_tier: %d\n", __func__, ctrl->val);
+		break;
 	default:
 		break;
 	}
@@ -2680,7 +2691,7 @@ int msm_vidc_ts_reorder_get_first_timestamp(struct msm_vidc_inst *inst, u64 *tim
 
 	/* check if list empty */
 	if (list_empty(&inst->ts_reorder.list)) {
-		i_vpr_e(inst, "%s: list empty. ts %lld\n", __func__, timestamp);
+		i_vpr_e(inst, "%s: list empty. ts %lld\n", __func__, *timestamp);
 		return -EINVAL;
 	}
 
@@ -2745,7 +2756,7 @@ int msm_vidc_put_delayed_unmap(struct msm_vidc_inst *inst, struct msm_vidc_map *
 	}
 
 	if (!map->skip_delayed_unmap) {
-		i_vpr_e(inst, "%s: no delayed unmap, addr %#x\n",
+		i_vpr_e(inst, "%s: no delayed unmap, addr %#llx\n",
 			__func__, map->device_addr);
 		return -EINVAL;
 	}
@@ -3485,7 +3496,7 @@ int msm_vidc_queue_buffer_single(struct msm_vidc_inst *inst, struct vb2_buffer *
 {
 	int rc = 0;
 	struct msm_vidc_buffer *buf;
-	struct msm_vidc_fence *fence;
+	struct msm_vidc_fence *fence = NULL;
 	enum msm_vidc_allow allow;
 
 	if (!inst || !vb2 || !inst->capabilities) {
@@ -3528,7 +3539,6 @@ exit:
 		if (fence)
 			msm_vidc_fence_destroy(inst, (u32)fence->dma_fence.seqno);
 	}
-
 	return rc;
 }
 
@@ -3553,7 +3563,7 @@ int msm_vidc_destroy_internal_buffer(struct msm_vidc_inst *inst,
 		return 0;
 	}
 
-	i_vpr_h(inst, "%s: destroy: type: %8s, size: %9u, device_addr %#x\n", __func__,
+	i_vpr_h(inst, "%s: destroy: type: %8s, size: %9u, device_addr %#llx\n", __func__,
 		buf_name(buffer->type), buffer->buffer_size, buffer->device_addr);
 
 	buffers = msm_vidc_get_buffers(inst, buffer->type, __func__);
@@ -3622,7 +3632,11 @@ int msm_vidc_get_internal_buffers(struct msm_vidc_inst *inst,
 	if (!buffers)
 		return -EINVAL;
 
-	if (buf_size <= buffers->size &&
+	if (is_split_mode_enabled(inst)){
+		buffers->reuse = false;
+		buffers->size = buf_size;
+		buffers->min_count = buf_count;
+        }else if (buf_size <= buffers->size &&
 		buf_count <= buffers->min_count) {
 		buffers->reuse = true;
 	} else {
@@ -3713,7 +3727,7 @@ int msm_vidc_create_internal_buffer(struct msm_vidc_inst *inst,
 
 	buffer->dmabuf = alloc->dmabuf;
 	buffer->device_addr = map->device_addr;
-	i_vpr_h(inst, "%s: create: type: %8s, size: %9u, device_addr %#x\n", __func__,
+	i_vpr_h(inst, "%s: create: type: %8s, size: %9u, device_addr %#llx\n", __func__,
 		buf_name(buffer_type), buffers->size, buffer->device_addr);
 
 	return 0;
@@ -3788,7 +3802,7 @@ int msm_vidc_queue_internal_buffers(struct msm_vidc_inst *inst,
 		/* mark queued */
 		buffer->attr |= MSM_VIDC_ATTR_QUEUED;
 
-		i_vpr_h(inst, "%s: queue: type: %8s, size: %9u, device_addr %#x\n", __func__,
+		i_vpr_h(inst, "%s: queue: type: %8s, size: %9u, device_addr %#llx\n", __func__,
 			buf_name(buffer->type), buffer->buffer_size, buffer->device_addr);
 	}
 
@@ -3869,7 +3883,7 @@ int msm_vidc_release_internal_buffers(struct msm_vidc_inst *inst,
 		/* mark pending release */
 		buffer->attr |= MSM_VIDC_ATTR_PENDING_RELEASE;
 
-		i_vpr_h(inst, "%s: release: type: %8s, size: %9u, device_addr %#x\n", __func__,
+		i_vpr_h(inst, "%s: release: type: %8s, size: %9u, device_addr %#llx\n", __func__,
 			buf_name(buffer->type), buffer->buffer_size, buffer->device_addr);
 	}
 
@@ -5288,7 +5302,7 @@ int msm_vidc_flush_delayed_unmap_buffers(struct msm_vidc_inst *inst,
 			if (!found) {
 				if (map->refcount > 1) {
 					i_vpr_e(inst,
-						"%s: unexpected map refcount: %u device addr %#x\n",
+						"%s: unexpected map refcount: %u device addr %#llx\n",
 						__func__, map->refcount, map->device_addr);
 					msm_vidc_change_inst_state(inst, MSM_VIDC_ERROR, __func__);
 				}
@@ -5337,7 +5351,7 @@ void msm_vidc_destroy_buffers(struct msm_vidc_inst *inst)
 			continue;
 		list_for_each_entry_safe(buf, dummy, &buffers->list, list) {
 			i_vpr_h(inst,
-				"destroying internal buffer: type %d idx %d fd %d addr %#x size %d\n",
+				"destroying internal buffer: type %d idx %d fd %d addr %#llx size %d\n",
 				buf->type, buf->index, buf->fd, buf->device_addr, buf->buffer_size);
 			msm_vidc_destroy_internal_buffer(inst, buf);
 		}
@@ -5388,7 +5402,7 @@ void msm_vidc_destroy_buffers(struct msm_vidc_inst *inst)
 	}
 
 	list_for_each_entry_safe(dbuf, dummy_dbuf, &inst->dmabuf_tracker, list) {
-		i_vpr_e(inst, "%s: removing dma_buf %#x, refcount %u\n",
+		i_vpr_e(inst, "%s: removing dma_buf %p, refcount %u\n",
 			__func__, dbuf->dmabuf, dbuf->refcount);
 		msm_vidc_memory_put_dmabuf_completely(inst, dbuf);
 	}
@@ -5822,7 +5836,10 @@ int msm_vidc_check_core_mbps(struct msm_vidc_inst *inst)
 	core_unlock(core, __func__);
 
 	if (mbps > core->capabilities[MAX_MBPS].value) {
-		rc = num_inactive_sessions ? -ENOMEM : -EAGAIN;
+		if (core->capabilities[MAX_MBPS_RETURN_ENOMEM].value)
+			rc = -ENOMEM;
+		else
+			rc = num_inactive_sessions ? -ENOMEM : -EAGAIN;
 		i_vpr_e(inst, "%s: Hardware overloaded. needed %u, max %u", __func__,
 			mbps, core->capabilities[MAX_MBPS].value);
 		return rc;
@@ -5915,7 +5932,7 @@ static int msm_vidc_check_inst_mbpf(struct msm_vidc_inst *inst)
 	if (mbpf > max_mbpf) {
 		i_vpr_e(inst, "%s: session overloaded. needed %u, max %u", __func__,
 			mbpf, max_mbpf);
-		return -ENOTSUPP;
+		return -ENOMEM;
 	}
 
 	return 0;
@@ -5948,8 +5965,8 @@ static bool msm_vidc_allow_image_encode_session(struct msm_vidc_inst *inst)
 	min_height = capability->cap[FRAME_HEIGHT].min;
 	max_height = capability->cap[FRAME_HEIGHT].max;
 	fmt = &inst->fmts[INPUT_PORT];
-	if (!is_in_range(fmt->fmt.pix_mp.width, min_width, max_width) ||
-		!is_in_range(fmt->fmt.pix_mp.height, min_height, max_height)) {
+	if (!in_range(fmt->fmt.pix_mp.width, min_width, max_width) ||
+		!in_range(fmt->fmt.pix_mp.height, min_height, max_height)) {
 		i_vpr_e(inst, "unsupported wxh [%u x %u], allowed [%u x %u] to [%u x %u]\n",
 			fmt->fmt.pix_mp.width, fmt->fmt.pix_mp.height,
 			min_width, min_height, max_width, max_height);
@@ -6075,8 +6092,8 @@ static int msm_vidc_check_resolution_supported(struct msm_vidc_inst *inst)
 
 	/* check if input width and height is in supported range */
 	if (is_decode_session(inst) || is_encode_session(inst)) {
-		if (!is_in_range(width, min_width, max_width) ||
-			!is_in_range(height, min_height, max_height)) {
+		if (!in_range(width, min_width, max_width) ||
+			!in_range(height, min_height, max_height)) {
 			i_vpr_e(inst,
 				"%s: unsupported input wxh [%u x %u], allowed range: [%u x %u] to [%u x %u]\n",
 				__func__, width, height, min_width,

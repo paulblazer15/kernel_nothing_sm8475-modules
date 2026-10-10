@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, 2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/iommu.h>
+#include <linux/version.h>
+#if (KERNEL_VERSION(5, 16, 0) > LINUX_VERSION_CODE)
 #include <linux/dma-iommu.h>
+#endif
 #include <linux/of.h>
 #include <linux/sort.h>
 #include <linux/of_address.h>
@@ -517,7 +520,7 @@ static int msm_vidc_load_regulator_table(struct msm_vidc_core *core)
 			d_vpr_e("Failed to alloc memory for regulator name\n");
 			goto err_reg_name_alloc;
 		}
-		strlcpy(rinfo->name, domains_property->name,
+		strscpy(rinfo->name, domains_property->name,
 			(supply - domains_property->name) + 1);
 
 		rinfo->has_hw_power_collapse = of_property_read_bool(
@@ -692,8 +695,15 @@ static int msm_vidc_read_resources_from_dt(struct platform_device *pdev)
 	d_vpr_h("%s: register base %pa, size %#x\n",
 		__func__, &dt->register_base, dt->register_size);
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 16, 0))
+	dt->irq = platform_get_irq(pdev, 0);
+#else
 	kres = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	dt->irq = kres ? kres->start : -1;
+#endif
+	if (dt->irq < 0)
+		d_vpr_e("%s: get irq failed, %d\n", __func__, dt->irq);
+
 	d_vpr_h("%s: irq %d\n", __func__, dt->irq);
 
 	rc = msm_vidc_load_fw_name(core);
@@ -775,7 +785,7 @@ static int msm_vidc_setup_context_bank(struct msm_vidc_core *core,
 		struct context_bank_info *cb, struct device *dev)
 {
 	int rc = 0;
-	struct bus_type *bus;
+	const struct bus_type *bus;
 
 	if (!core || !dev || !cb) {
 		d_vpr_e("%s: Invalid Input params\n", __func__);
@@ -801,7 +811,9 @@ static int msm_vidc_setup_context_bank(struct msm_vidc_core *core,
 	 * When memory is fragmented, below configuration increases the
 	 * possibility to get a mapping for buffer in the configured CB.
 	 */
+#if (KERNEL_VERSION(5, 16, 0) > LINUX_VERSION_CODE)
 	iommu_dma_enable_best_fit_algo(cb->dev);
+#endif
 
 	/*
 	 * configure device segment size and segment boundary to ensure

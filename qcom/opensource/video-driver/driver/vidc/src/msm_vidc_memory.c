@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2022, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, 2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/dma-buf.h>
@@ -9,6 +9,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/qcom-dma-mapping.h>
 #include <linux/mem-buf.h>
+#include <linux/vmalloc.h>
 #include <soc/qcom/secure_buffer.h>
 
 #include "msm_vidc_memory.h"
@@ -18,6 +19,10 @@
 #include "msm_vidc_dt.h"
 #include "msm_vidc_core.h"
 #include "msm_vidc_events.h"
+
+#if (KERNEL_VERSION(5, 16, 0) <= LINUX_VERSION_CODE)
+	MODULE_IMPORT_NS(DMA_BUF);
+#endif
 
 struct msm_vidc_buf_region_name {
 	enum msm_vidc_buffer_region region;
@@ -132,7 +137,7 @@ void msm_vidc_memory_put_dmabuf(struct msm_vidc_inst *inst, struct dma_buf *dmab
 		}
 	}
 	if (!found) {
-		i_vpr_e(inst, "%s: invalid dmabuf %#x\n", __func__, dmabuf);
+		i_vpr_e(inst, "%s: invalid dmabuf %p\n", __func__, dmabuf);
 		return;
 	}
 
@@ -243,10 +248,14 @@ int msm_vidc_memory_map(struct msm_vidc_core *core, struct msm_vidc_map *map)
 	 */
 	attach->dma_map_attrs |= DMA_ATTR_SKIP_CPU_SYNC;
 	if (core->dt->sys_cache_present)
-		attach->dma_map_attrs |=
-			DMA_ATTR_IOMMU_USE_UPSTREAM_HINT;
+		attach->dma_map_attrs |= 0UL;
+			/*TODO: define DMA_ATTR_IOMMU_USE_UPSTREAM_HINT;*/
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0))
 	table = dma_buf_map_attachment(attach, DMA_BIDIRECTIONAL);
+#else
+	table = dma_buf_map_attachment_unlocked(attach, DMA_BIDIRECTIONAL);
+#endif
 	if (IS_ERR_OR_NULL(table)) {
 		rc = PTR_ERR(table) ? PTR_ERR(table) : -ENOMEM;
 		d_vpr_e("Failed to map table\n");
@@ -265,13 +274,17 @@ int msm_vidc_memory_map(struct msm_vidc_core *core, struct msm_vidc_map *map)
 
 exit:
 	d_vpr_l(
-		"%s: type %11s, device_addr %#x, refcount %d, region %d\n",
+		"%s: type %11s, device_addr %#llx, refcount %d, region %d\n",
 		__func__, buf_name(map->type), map->device_addr, map->refcount, map->region);
 
 	return 0;
 
 error_sg:
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0))
 	dma_buf_unmap_attachment(attach, table, DMA_BIDIRECTIONAL);
+#else
+	dma_buf_unmap_attachment_unlocked(attach, table, DMA_BIDIRECTIONAL);
+#endif
 error_table:
 	dma_buf_detach(map->dmabuf, attach);
 error_attach:
@@ -297,13 +310,17 @@ int msm_vidc_memory_unmap(struct msm_vidc_core *core,
 	}
 
 	d_vpr_l(
-		"%s: type %11s, device_addr %#x, refcount %d, region %d\n",
+		"%s: type %11s, device_addr %#llx, refcount %d, region %d\n",
 		__func__, buf_name(map->type), map->device_addr, map->refcount, map->region);
 
 	if (map->refcount)
 		goto exit;
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0))
 	dma_buf_unmap_attachment(map->attach, map->table, DMA_BIDIRECTIONAL);
+#else
+	dma_buf_unmap_attachment_unlocked(map->attach, map->table, DMA_BIDIRECTIONAL);
+#endif
 	dma_buf_detach(map->dmabuf, map->attach);
 
 	map->device_addr = 0x0;
@@ -413,6 +430,11 @@ int msm_vidc_memory_alloc(struct msm_vidc_core *core, struct msm_vidc_alloc *mem
 	if (mem->map_kernel) {
 		dma_buf_begin_cpu_access(mem->dmabuf, DMA_BIDIRECTIONAL);
 
+	/*
+	 * Waipio uses Kernel version 5.10.x,
+	 * Kalama uses Kernel Version 5.15.x,
+	 * Pineapple uses Kernel Version 5.18.x
+	 */
 #if (KERNEL_VERSION(5, 15, 0) > LINUX_VERSION_CODE)
 		mem->kvaddr = dma_buf_vmap(mem->dmabuf);
 		if (!mem->kvaddr) {
@@ -420,8 +442,16 @@ int msm_vidc_memory_alloc(struct msm_vidc_core *core, struct msm_vidc_alloc *mem
 			rc = -EIO;
 			goto error;
 		}
-#else
+#elif (KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE)
 		rc = dma_buf_vmap(mem->dmabuf, &mem->dmabuf_map);
+		if (rc) {
+			d_vpr_e("%s: kernel map failed\n", __func__);
+			rc = -EIO;
+			goto error;
+		}
+		mem->kvaddr = mem->dmabuf_map.vaddr;
+#else
+		rc = dma_buf_vmap_unlocked(mem->dmabuf, &mem->dmabuf_map);
 		if (rc) {
 			d_vpr_e("%s: kernel map failed\n", __func__);
 			rc = -EIO;
@@ -465,8 +495,10 @@ int msm_vidc_memory_free(struct msm_vidc_core *core, struct msm_vidc_alloc *mem)
 	if (mem->kvaddr) {
 #if (KERNEL_VERSION(5, 15, 0) > LINUX_VERSION_CODE)
 		dma_buf_vunmap(mem->dmabuf, mem->kvaddr);
-#else
+#elif (KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE)
 		dma_buf_vunmap(mem->dmabuf, &mem->dmabuf_map);
+#else
+		dma_buf_vunmap_unlocked(mem->dmabuf, &mem->dmabuf_map);
 #endif
 		mem->kvaddr = NULL;
 		dma_buf_end_cpu_access(mem->dmabuf, DMA_BIDIRECTIONAL);
@@ -537,7 +569,7 @@ void msm_memory_free(struct msm_vidc_inst *inst, void *vidc_buf)
 
 	/* sanitize buffer addr */
 	if (hdr->buf != vidc_buf) {
-		i_vpr_e(inst, "%s: invalid buf addr %#x\n", __func__, vidc_buf);
+		i_vpr_e(inst, "%s: invalid buf addr %p\n", __func__, vidc_buf);
 		return;
 	}
 
@@ -550,7 +582,7 @@ void msm_memory_free(struct msm_vidc_inst *inst, void *vidc_buf)
 
 	/* catch double-free request */
 	if (!hdr->busy) {
-		i_vpr_e(inst, "%s: double free request. type %s, addr %#x\n", __func__,
+		i_vpr_e(inst, "%s: double free request. type %s, addr %p\n", __func__,
 			pool->name, vidc_buf);
 		return;
 	}
@@ -685,21 +717,21 @@ int msm_memory_cache_operations(struct msm_vidc_inst *inst,
 		return -EINVAL;
 	}
 
+	// TODO gdoddabe: need to review DMA buf CMO's according to kernel version
 	switch (cache_type) {
 	case MSM_MEM_CACHE_CLEAN_INVALIDATE:
-		rc = dma_buf_begin_cpu_access_partial(dbuf, DMA_TO_DEVICE,
+		rc = dma_buf_end_cpu_access_partial(dbuf, DMA_FROM_DEVICE,
 				offset, size);
 		if (rc)
 			break;
-		rc = dma_buf_end_cpu_access_partial(dbuf, DMA_FROM_DEVICE,
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
+		rc = dma_buf_begin_cpu_access_partial(dbuf, DMA_FROM_DEVICE,
 				offset, size);
+#endif
 		break;
 	case MSM_MEM_CACHE_INVALIDATE:
 		rc = dma_buf_begin_cpu_access_partial(dbuf, DMA_FROM_DEVICE,
-				offset, size);
-		if (rc)
-			break;
-		rc = dma_buf_end_cpu_access_partial(dbuf, DMA_FROM_DEVICE,
 				offset, size);
 		break;
 	default:

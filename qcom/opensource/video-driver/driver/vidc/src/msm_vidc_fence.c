@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include "msm_vidc_fence.h"
@@ -169,6 +169,7 @@ int msm_vidc_fence_signal(struct msm_vidc_inst *inst, u32 fence_id)
 exit:
 	return rc;
 }
+
 
 void msm_vidc_fence_destroy(struct msm_vidc_inst *inst, u32 fence_id)
 {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/of.h>
@@ -81,7 +81,7 @@ static struct msm_platform_core_capability core_data_khaje[] = {
 	{STATS_TIMEOUT_MS, 2000},
 	{AV_SYNC_WINDOW_SIZE, 40},
 	{NON_FATAL_FAULTS, 1},
-	{ENC_AUTO_FRAMERATE, 0},
+	{ENC_AUTO_FRAMERATE, 1},
 	{MMRM, 0},
 };
 
@@ -478,7 +478,7 @@ static struct msm_platform_inst_capability instance_data_khaje[] = {
 		CAP_FLAG_NONE,
 		{BITRATE_MODE},
 		{STAGE},
-		msm_vidc_adjust_lowlatency_mode, NULL},
+		msm_vidc_adjust_enc_lowlatency_mode, NULL},
 
 	{LOWLATENCY_MODE, DEC, H264|HEVC|VP9,
 		V4L2_MPEG_MSM_VIDC_DISABLE, V4L2_MPEG_MSM_VIDC_ENABLE,
@@ -998,7 +998,7 @@ static struct msm_platform_inst_capability instance_data_khaje[] = {
 
 	{LEVEL, DEC, H264,
 		V4L2_MPEG_VIDEO_H264_LEVEL_1_0,
-		V4L2_MPEG_VIDEO_H264_LEVEL_5_0,
+		V4L2_MPEG_VIDEO_H264_LEVEL_4_2,
 		BIT(V4L2_MPEG_VIDEO_H264_LEVEL_1_0)|
 		BIT(V4L2_MPEG_VIDEO_H264_LEVEL_1B)|
 		BIT(V4L2_MPEG_VIDEO_H264_LEVEL_1_1)|
@@ -1012,9 +1012,8 @@ static struct msm_platform_inst_capability instance_data_khaje[] = {
 		BIT(V4L2_MPEG_VIDEO_H264_LEVEL_3_2)|
 		BIT(V4L2_MPEG_VIDEO_H264_LEVEL_4_0)|
 		BIT(V4L2_MPEG_VIDEO_H264_LEVEL_4_1)|
-		BIT(V4L2_MPEG_VIDEO_H264_LEVEL_4_2)|
-		BIT(V4L2_MPEG_VIDEO_H264_LEVEL_5_0),
-		V4L2_MPEG_VIDEO_H264_LEVEL_5_0,
+		BIT(V4L2_MPEG_VIDEO_H264_LEVEL_4_2),
+		V4L2_MPEG_VIDEO_H264_LEVEL_4_2,
 		V4L2_CID_MPEG_VIDEO_H264_LEVEL,
 		HFI_PROP_LEVEL,
 		CAP_FLAG_ROOT | CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, 2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <media/v4l2_vidc_extensions.h>
@@ -1102,6 +1102,7 @@ static int msm_vdec_subscribe_property(struct msm_vidc_inst *inst,
 			(count + 1) * sizeof(u32));
 	if (rc)
 		return rc;
+
 	return rc;
 }
 
@@ -1191,6 +1192,7 @@ static int msm_vdec_subscribe_metadata(struct msm_vidc_inst *inst,
 			(count + 1) * sizeof(u32));
 	if (rc)
 		return rc;
+
 	return rc;
 }
 
@@ -1247,6 +1249,7 @@ static int msm_vdec_set_delivery_mode_metadata(struct msm_vidc_inst *inst,
 			(count + 1) * sizeof(u32));
 	if (rc)
 		return rc;
+
 	return rc;
 }
 
@@ -1473,9 +1476,9 @@ static int msm_vdec_read_input_subcr_params(struct msm_vidc_inst *inst)
 	inst->crop.top = subsc_params.crop_offsets[0] & 0xFFFF;
 	inst->crop.left = (subsc_params.crop_offsets[0] >> 16) & 0xFFFF;
 	inst->crop.height = inst->fmts[INPUT_PORT].fmt.pix_mp.height -
-		(subsc_params.crop_offsets[1] & 0xFFFF);
+		(subsc_params.crop_offsets[1] & 0xFFFF) - inst->crop.top;
 	inst->crop.width = inst->fmts[INPUT_PORT].fmt.pix_mp.width -
-		((subsc_params.crop_offsets[1] >> 16) & 0xFFFF);
+		((subsc_params.crop_offsets[1] >> 16) & 0xFFFF) - inst->crop.left;
 
 	msm_vidc_update_cap_value(inst, PROFILE, subsc_params.profile, __func__);
 	msm_vidc_update_cap_value(inst, LEVEL, subsc_params.level, __func__);
@@ -1526,22 +1529,6 @@ int msm_vdec_input_port_settings_change(struct msm_vidc_inst *inst)
 	event.type = V4L2_EVENT_SOURCE_CHANGE;
 	event.u.src_change.changes = V4L2_EVENT_SRC_CH_RESOLUTION;
 	v4l2_event_queue_fh(&inst->event_handler, &event);
-
-	rc = msm_vdec_get_input_internal_buffers(inst);
-	if (rc)
-		return rc;
-
-	rc = msm_vdec_release_input_internal_buffers(inst);
-	if (rc)
-		return rc;
-
-	rc = msm_vdec_create_input_internal_buffers(inst);
-	if (rc)
-		return rc;
-
-	rc = msm_vdec_queue_input_internal_buffers(inst);
-	if (rc)
-		return rc;
 
 	rc = msm_vidc_set_stage(inst, STAGE);
 	if (rc)
@@ -1978,6 +1965,22 @@ int msm_vdec_streamon_output(struct msm_vidc_inst *inst)
 	if (rc)
 		goto error;
 
+	rc = msm_vdec_get_input_internal_buffers(inst);
+	if (rc)
+		return rc;
+
+	rc = msm_vdec_release_input_internal_buffers(inst);
+	if (rc)
+		return rc;
+
+	rc = msm_vdec_create_input_internal_buffers(inst);
+	if (rc)
+		return rc;
+
+	rc = msm_vdec_queue_input_internal_buffers(inst);
+	if (rc)
+		return rc;
+
 	rc = msm_vidc_session_streamon(inst, OUTPUT_PORT);
 	if (rc)
 		goto error;
@@ -2236,7 +2239,7 @@ static int msm_vidc_unmap_excessive_mappings(struct msm_vidc_inst *inst)
 	list_for_each_entry_safe(map, temp, &inst->mappings.output.list, list) {
 		if (is_valid_removable_buffer(inst, map)) {
 			i_vpr_l(inst,
-				"%s: type %11s, device_addr %#x, refcount %d, region %d\n",
+				"%s: type %11s, device_addr %#llx, refcount %d, region %d\n",
 				__func__, buf_name(map->type), map->device_addr,
 				map->refcount, map->region);
 			rc = msm_vidc_put_delayed_unmap(inst, map);
@@ -2393,6 +2396,21 @@ int msm_vdec_process_cmd(struct msm_vidc_inst *inst, u32 cmd)
 		msm_vidc_allow_dcvs(inst);
 		msm_vidc_power_data_reset(inst);
 
+		rc = msm_vdec_get_input_internal_buffers(inst);
+		if (rc)
+			return rc;
+
+		rc = msm_vdec_release_input_internal_buffers(inst);
+		if (rc)
+			return rc;
+
+		rc = msm_vdec_create_input_internal_buffers(inst);
+		if (rc)
+			return rc;
+
+		rc = msm_vdec_queue_input_internal_buffers(inst);
+		if (rc)
+			return rc;
 		/* allocate and queue extra dpb buffers */
 		rc = msm_vdec_alloc_and_queue_additional_dpb_buffers(inst);
 		if (rc)
@@ -2907,7 +2925,7 @@ int msm_vdec_enum_fmt(struct msm_vidc_inst *inst, struct v4l2_fmtdesc *f)
 		if (!f->pixelformat)
 			return -EINVAL;
 		f->flags = V4L2_FMT_FLAG_COMPRESSED;
-		strlcpy(f->description, "codec", sizeof(f->description));
+		strscpy(f->description, "codec", sizeof(f->description));
 	} else if (f->type == OUTPUT_MPLANE) {
 		u32 formats = inst->capabilities->cap[PIX_FMTS].step_or_mask;
 		u32 idx = 0;
@@ -2929,11 +2947,11 @@ int msm_vdec_enum_fmt(struct msm_vidc_inst *inst, struct v4l2_fmtdesc *f)
 				__func__);
 		if (!f->pixelformat)
 			return -EINVAL;
-		strlcpy(f->description, "colorformat", sizeof(f->description));
+		strscpy(f->description, "colorformat", sizeof(f->description));
 	} else if (f->type == INPUT_META_PLANE || f->type == OUTPUT_META_PLANE) {
 		if (!f->index) {
 			f->pixelformat = V4L2_META_FMT_VIDC;
-			strlcpy(f->description, "metadata", sizeof(f->description));
+			strscpy(f->description, "metadata", sizeof(f->description));
 		} else {
 			return -EINVAL;
 		}

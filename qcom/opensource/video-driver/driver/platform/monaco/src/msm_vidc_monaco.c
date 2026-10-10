@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/of.h>
@@ -47,12 +47,12 @@ static struct msm_platform_core_capability core_data_monaco[] = {
 	{ENC_CODECS, H264|HEVC|HEIC},
 	{DEC_CODECS, H264|HEVC|VP9},
 	{MAX_SESSION_COUNT, 16},
-	{MAX_NUM_720P_SESSIONS, 16},
-	{MAX_NUM_1080P_SESSIONS, 8},
+	{MAX_NUM_720P_SESSIONS, 4},
+	{MAX_NUM_1080P_SESSIONS, 2},
 	{MAX_NUM_4K_SESSIONS, 0},
 	{MAX_NUM_8K_SESSIONS, 0},
-	{MAX_SECURE_SESSION_COUNT, 3},
-	{MAX_RT_MBPF, 16320}, /* ((1920x1088)/256)*2 */
+	{MAX_SECURE_SESSION_COUNT, 0},
+	{MAX_RT_MBPF, 16320},	/* (1920x1088)/256*2 */
 	{MAX_MBPF, 32640}, /* ((1920x1088)/256)*4 */
 	{MAX_MBPS, 489600},	/* ((1088x1920)/256)@60fps */
 	{MAX_IMAGE_MBPF, 262144},
@@ -61,6 +61,7 @@ static struct msm_platform_core_capability core_data_monaco[] = {
 	{MAX_MBPF_B_FRAME, 8160}, /* (1920x1088)/256 */
 	{MAX_MBPS_B_FRAME, 244800}, /* (1920*1088)/256 MBs@30fps */
 	{MAX_MBPS_ALL_INTRA, 244800}, /* 1920*1088/256 MBs@30fps */
+	{MAX_MBPS_RETURN_ENOMEM, 1},
 	{MAX_ENH_LAYER_COUNT, 5},
 	{NUM_VPP_PIPE, 1},
 	{SW_PC, 1},
@@ -178,8 +179,8 @@ static struct msm_platform_inst_capability instance_data_monaco[] = {
 	{BATCH_MBPF, DEC, H264|HEVC|VP9, 36, 8160, 1, 8160},
 	{BATCH_FPS, DEC, H264|HEVC|VP9, 1, 120, 1, 120},
 	{SECURE_MBPF, ENC|DEC, H264|HEVC|VP9, 64, 8160, 1, 8160},
-	{MBPS, ENC, CODECS_ALL, 64, 489600, 1, 489600},
-	{MBPS, DEC, CODECS_ALL, 36, 489600, 1, 489600},
+	{MBPS, ENC, CODECS_ALL, 64, 489600, 1, 244800},
+	{MBPS, DEC, CODECS_ALL, 36, 489600, 1, 244800},
 	/* ((1920 * 1088) / 256) * 30 fps */
 	{POWER_SAVE_MBPS, ENC, CODECS_ALL, 0, 244800, 1, 244800},
 
@@ -189,7 +190,7 @@ static struct msm_platform_inst_capability instance_data_monaco[] = {
 		0,
 		HFI_PROP_FRAME_RATE,
 		CAP_FLAG_ROOT | CAP_FLAG_OUTPUT_PORT,
-		{0}, {0},
+		{0}, {LEVEL},
 		NULL, msm_vidc_set_q16},
 
 	{FRAME_RATE, DEC, CODECS_ALL,
@@ -346,7 +347,8 @@ static struct msm_platform_inst_capability instance_data_monaco[] = {
 		HFI_PROP_TOTAL_BITRATE,
 		CAP_FLAG_OUTPUT_PORT | CAP_FLAG_INPUT_PORT |
 			CAP_FLAG_DYNAMIC_ALLOWED,
-		{ENH_LAYER_COUNT, BITRATE_MODE}, {PEAK_BITRATE},
+		{ENH_LAYER_COUNT, BITRATE_MODE},
+		{PEAK_BITRATE, LEVEL},
 		msm_vidc_adjust_bitrate, msm_vidc_set_bitrate},
 
 	{BITRATE_MODE, ENC, H264,
@@ -483,7 +485,7 @@ static struct msm_platform_inst_capability instance_data_monaco[] = {
 		CAP_FLAG_NONE,
 		{BITRATE_MODE},
 		{STAGE},
-		msm_vidc_adjust_lowlatency_mode, NULL},
+		msm_vidc_adjust_enc_lowlatency_mode, NULL},
 
 	{LOWLATENCY_MODE, DEC, H264|HEVC|VP9,
 		V4L2_MPEG_MSM_VIDC_DISABLE, V4L2_MPEG_MSM_VIDC_ENABLE,
@@ -569,7 +571,7 @@ static struct msm_platform_inst_capability instance_data_monaco[] = {
 		HFI_PROP_BITRATE_BOOST,
 		CAP_FLAG_OUTPUT_PORT,
 		{BITRATE_MODE, MIN_QUALITY},
-		{0},
+		{LEVEL},
 		msm_vidc_adjust_bitrate_boost,
 		msm_vidc_set_vbr_related_properties},
 
@@ -767,14 +769,18 @@ static struct msm_platform_inst_capability instance_data_monaco[] = {
 		V4L2_MPEG_VIDEO_H264_HIERARCHICAL_CODING_P,
 		V4L2_CID_MPEG_VIDEO_H264_HIERARCHICAL_CODING_TYPE,
 		HFI_PROP_LAYER_ENCODING_TYPE,
-		CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU},
+		CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU,
+		{0}, {LEVEL}
+		},
 
 	{LAYER_ENABLE, ENC, H264,
 		V4L2_MPEG_MSM_VIDC_DISABLE, V4L2_MPEG_MSM_VIDC_ENABLE,
 		1, V4L2_MPEG_MSM_VIDC_DISABLE,
 		V4L2_CID_MPEG_VIDEO_H264_HIERARCHICAL_CODING,
 		HFI_PROP_LAYER_ENCODING_TYPE,
-		CAP_FLAG_OUTPUT_PORT},
+		CAP_FLAG_OUTPUT_PORT,
+		{0}, {LEVEL}
+		},
 
 	{ENH_LAYER_COUNT, ENC, HEVC,
 		0, 6, 1, 0,
@@ -793,7 +799,7 @@ static struct msm_platform_inst_capability instance_data_monaco[] = {
 		CAP_FLAG_OUTPUT_PORT | CAP_FLAG_INPUT_PORT |
 			CAP_FLAG_DYNAMIC_ALLOWED,
 		{BITRATE_MODE, META_EVA_STATS},
-		{GOP_SIZE, B_FRAME, BIT_RATE, MIN_QUALITY},
+		{GOP_SIZE, B_FRAME, BIT_RATE, MIN_QUALITY, LEVEL},
 		msm_vidc_adjust_layer_count, msm_vidc_set_layer_count_and_type},
 
 	/*
@@ -1068,9 +1074,9 @@ static struct msm_platform_inst_capability instance_data_monaco[] = {
 		V4L2_CID_MPEG_VIDEO_H264_LEVEL,
 		HFI_PROP_LEVEL,
 		CAP_FLAG_ROOT | CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU,
+		{BIT_RATE},
 		{0},
-		{0},
-		NULL, msm_vidc_set_level},
+		msm_vidc_adjust_level_tier, msm_vidc_set_level},
 
 	{LEVEL, DEC, HEVC|HEIC,
 		V4L2_MPEG_VIDEO_HEVC_LEVEL_1,
@@ -1106,9 +1112,9 @@ static struct msm_platform_inst_capability instance_data_monaco[] = {
 		V4L2_CID_MPEG_VIDEO_HEVC_LEVEL,
 		HFI_PROP_LEVEL,
 		CAP_FLAG_ROOT | CAP_FLAG_OUTPUT_PORT | CAP_FLAG_MENU,
+		{BIT_RATE},
 		{0},
-		{0},
-		NULL, msm_vidc_set_level},
+		msm_vidc_adjust_level_tier, msm_vidc_set_level},
 
 	/* TODO: Bring the VP9 Level upstream GKI change, and level cap here:
 	 *	go/videogki
@@ -1542,8 +1548,8 @@ static struct msm_platform_inst_capability instance_data_monaco[] = {
 		NULL, msm_vidc_set_u32},
 	{PIX_FMTS, ENC, HEIC,
 		MSM_VIDC_FMT_NV12,
-		MSM_VIDC_FMT_NV21,
-		MSM_VIDC_FMT_NV12 | MSM_VIDC_FMT_NV21,
+		MSM_VIDC_FMT_NV12,
+		MSM_VIDC_FMT_NV12,
 		MSM_VIDC_FMT_NV12,
 		0, 0,
 		0,
@@ -1577,6 +1583,16 @@ static struct msm_platform_inst_capability instance_data_monaco[] = {
 		0, 100,
 		1, 100,
 		V4L2_CID_MPEG_VIDC_VENC_COMPLEXITY},
+	{SIGNAL_COLOR_INFO, ENC, CODECS_ALL,
+		0, INT_MAX, 1, 0,
+		V4L2_CID_MPEG_VIDC_SIGNAL_COLOR_INFO,
+		HFI_PROP_SIGNAL_COLOR_INFO,
+		CAP_FLAG_INPUT_PORT | CAP_FLAG_DYNAMIC_ALLOWED | CAP_FLAG_ROOT,
+		{0},
+		{0},
+		NULL,
+		msm_vidc_set_signal_color_info
+	},
 	{META_MAX_NUM_REORDER_FRAMES, DEC, HEVC | H264,
 		V4L2_MPEG_MSM_VIDC_DISABLE, V4L2_MPEG_MSM_VIDC_ENABLE,
 		1, V4L2_MPEG_MSM_VIDC_DISABLE,

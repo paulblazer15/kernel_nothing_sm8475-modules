@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2023-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, 2025 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/iommu.h>
-#include <linux/qcom_scm.h>
 #include <linux/soc/qcom/smem.h>
 #include <linux/irqreturn.h>
 #include <linux/reset.h>
@@ -712,12 +711,7 @@ int __set_clk_rate(struct msm_vidc_core *core,
 		return -EINVAL;
 	}
 
-	/*
-	 * This conversion is necessary since we are scaling clock values based on
-	 * the branch clock. However, mmrm driver expects source clock to be registered
-	 * and used for scaling.
-	 * TODO: Remove this scaling if using source clock instead of branch clock.
-	 */
+	/* This conversion is necessary since we are scaling clock values based on the branch clock. */
 	src_clk_scale_ratio = msm_vidc_get_src_clk_scaling_ratio(core);
 	rate = rate * src_clk_scale_ratio;
 
@@ -1530,7 +1524,7 @@ static int __register_mmrm(struct msm_vidc_core *core)
 		desc.client_type = MMRM_CLIENT_CLOCK;
 		desc.client_info.desc.client_domain = MMRM_CLIENT_DOMAIN_VIDEO;
 		desc.client_info.desc.client_id = cl->clk_id;
-		strlcpy(name, cl->name, sizeof(desc.client_info.desc.name));
+		strscpy(name, cl->name, sizeof(desc.client_info.desc.name));
 		desc.client_info.desc.clk = cl->clk;
 		desc.priority = MMRM_CLIENT_PRIOR_LOW;
 		desc.pvt_data = notifier_data.pvt_data;
@@ -1571,6 +1565,7 @@ static void __deregister_mmrm(struct msm_vidc_core *core)
 }
 static int __register_mmrm(struct msm_vidc_core *core)
 {
+	d_vpr_h("%s: MMRM is not supported!\n", __func__);
 	return 0;
 }
 #endif
@@ -2298,20 +2293,42 @@ static int venus_hfi_reset_queue_header(struct msm_vidc_core *core)
 
 	for (i = 0; i < VIDC_IFACEQ_NUMQ; i++) {
 		iface_q = &core->iface_queues[i];
+		if (!iface_q->q_hdr) {
+		d_vpr_e("%s: invalid address\n", __func__);
+		return -ENODATA;
+		}
 		__set_queue_hdr_defaults(iface_q->q_hdr);
 	}
 
 	iface_q = &core->iface_queues[VIDC_IFACEQ_CMDQ_IDX];
+
+	if (!iface_q) {
+		d_vpr_e("%s: invalid address\n", __func__);
+		return -ENODATA;
+	}
+
 	q_hdr = iface_q->q_hdr;
 	q_hdr->qhdr_start_addr = iface_q->q_array.align_device_addr;
 	q_hdr->qhdr_type |= HFI_Q_ID_HOST_TO_CTRL_CMD_Q;
 
 	iface_q = &core->iface_queues[VIDC_IFACEQ_MSGQ_IDX];
+
+	if (!iface_q) {
+		d_vpr_e("%s: invalid address\n", __func__);
+		return -ENODATA;
+	}
+
 	q_hdr = iface_q->q_hdr;
 	q_hdr->qhdr_start_addr = iface_q->q_array.align_device_addr;
 	q_hdr->qhdr_type |= HFI_Q_ID_CTRL_TO_HOST_MSG_Q;
 
 	iface_q = &core->iface_queues[VIDC_IFACEQ_DBGQ_IDX];
+
+	if (!iface_q) {
+		d_vpr_e("%s: invalid address\n", __func__);
+		return -ENODATA;
+	}
+
 	q_hdr = iface_q->q_hdr;
 	q_hdr->qhdr_start_addr = iface_q->q_array.align_device_addr;
 	q_hdr->qhdr_type |= HFI_Q_ID_CTRL_TO_HOST_DEBUG_Q;
@@ -2385,7 +2402,7 @@ int venus_hfi_interface_queues_init(struct msm_vidc_core *core)
 			core->iface_q_table.align_virtual_addr;
 	q_tbl_hdr->qtbl_version = 0;
 	q_tbl_hdr->device_addr = (void *)core;
-	strlcpy(q_tbl_hdr->name, "msm_v4l2_vidc", sizeof(q_tbl_hdr->name));
+	strscpy(q_tbl_hdr->name, "msm_v4l2_vidc", sizeof(q_tbl_hdr->name));
 	q_tbl_hdr->qtbl_size = VIDC_IFACEQ_TABLE_SIZE;
 	q_tbl_hdr->qtbl_qhdr0_offset = sizeof(struct hfi_queue_table_header);
 	q_tbl_hdr->qtbl_qhdr_size = sizeof(struct hfi_queue_header);
@@ -2499,7 +2516,7 @@ static int __load_fw_to_memory(struct platform_device *pdev,
 
 	virt = memremap(phys, res_size, MEMREMAP_WC);
 	if (!virt) {
-		d_vpr_e("%s: failed to remap fw memory phys %pa[p]\n",
+		d_vpr_e("%s: failed to remap fw memory phys %llu[p]\n",
 				__func__, phys);
 		return -ENOMEM;
 	}
@@ -2588,7 +2605,7 @@ int __load_fw(struct msm_vidc_core *core)
 	/* configure interface_queues memory to firmware */
 	rc = call_venus_op(core, setup_ucregion_memmap, core);
 	if (rc) {
-		d_vpr_e("%s: failed to setup ucregion\n");
+		d_vpr_e("%s: failed to setup ucregion\n", __func__);
 		goto fail_setup_ucregion;
 	}
 
@@ -2864,6 +2881,9 @@ int venus_hfi_core_deinit(struct msm_vidc_core *core, bool force)
 	 */
 	if (msm_vidc_fw_dump)
 		fw_coredump(core);
+
+	if (core->capabilities[FW_UNLOAD].value)
+		venus_hfi_interface_queues_deinit(core);
 
 	return 0;
 }
