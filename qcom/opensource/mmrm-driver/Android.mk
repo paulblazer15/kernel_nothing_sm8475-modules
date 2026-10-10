@@ -1,4 +1,4 @@
-ifneq ($(TARGET_BOARD_PLATFORM), monaco)
+ifneq ($(filter $(TARGET_BOARD_PLATFORM), monaco vienna),$(TARGET_BOARD_PLATFORM))
 BOARD_OPENSOURCE_DIR ?= vendor/qcom/opensource
 BOARD_COMMON_DIR ?= device/qcom/common
 
@@ -14,6 +14,9 @@ KBUILD_OPTIONS += BOARD_PLATFORM=$(TARGET_BOARD_PLATFORM)
 DLKM_DIR   := $(BOARD_COMMON_DIR)/dlkm
 
 LOCAL_PATH := $(call my-dir)
+LOCAL_MODULE_DDK_BUILD    := true
+LOCAL_MODULE_KO_DIRS      := driver/msm-mmrm.ko
+
 include $(CLEAR_VARS)
 # For incremental compilation
 LOCAL_SRC_FILES           := $(wildcard $(LOCAL_PATH)/**/*) $(wildcard $(LOCAL_PATH)/*)
