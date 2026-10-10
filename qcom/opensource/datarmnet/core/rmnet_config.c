@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -15,11 +15,9 @@
  */
 
 #include <net/sock.h>
-#include <net/addrconf.h>
 #include <linux/module.h>
 #include <linux/netlink.h>
 #include <linux/netdevice.h>
-#include <linux/inetdevice.h>
 #include "rmnet_config.h"
 #include "rmnet_handlers.h"
 #include "rmnet_vnd.h"
@@ -138,28 +136,33 @@ static int rmnet_register_real_device(struct net_device *real_dev)
 	port->phy_shs_cfg.map_mask = QMAP_SHS_MASK;
 	port->phy_shs_cfg.max_pkts = QMAP_SHS_PKT_LIMIT;
 
-	rc = netdev_rx_handler_register(real_dev, rmnet_rx_handler, port);
-	if (rc) {
-		kfree(port);
-		return -EBUSY;
-	}
-	/* hold on to real dev for MAP data */
-	dev_hold(real_dev);
+
+	rmnet_map_tx_aggregate_init(port);
+	rmnet_map_cmd_init(port);
+
 
 	for (entry = 0; entry < RMNET_MAX_LOGICAL_EP; entry++)
 		INIT_HLIST_HEAD(&port->muxed_ep[entry]);
 
 	rc = rmnet_descriptor_init(port);
 	if (rc) {
-		rmnet_descriptor_deinit(port);
-		return rc;
+		goto err;
 	}
 
-	rmnet_map_tx_aggregate_init(port);
-	rmnet_map_cmd_init(port);
+	rc = netdev_rx_handler_register(real_dev, rmnet_rx_handler, port);
+	if (rc) {
+		rc = -EBUSY;
+		goto err;
+	}
+	/* hold on to real dev for MAP data */
+	dev_hold(real_dev);
 
 	netdev_dbg(real_dev, "registered with rmnet\n");
 	return 0;
+err:
+	rmnet_descriptor_deinit(port);
+	kfree(port);
+	return rc;
 }
 
 static void rmnet_unregister_bridge(struct net_device *dev,
@@ -230,6 +233,8 @@ static int rmnet_newlink(struct net *src_net, struct net_device *dev,
 		flags = nla_data(data[IFLA_RMNET_FLAGS]);
 		data_format = flags->flags & flags->mask;
 		netdev_dbg(dev, "data format [0x%08X]\n", data_format);
+		if (port->data_format & RMNET_INGRESS_FORMAT_PS)
+			data_format |= RMNET_INGRESS_FORMAT_PS;
 		port->data_format = data_format;
 	}
 
@@ -313,9 +318,6 @@ static void rmnet_force_unassociate_device(struct net_device *dev)
 
 	rmnet_unregister_bridge(dev, port);
 
-	hlist_for_each_entry_rcu(ep, &port->muxed_ep[0], hlnode)
-		hlist_del_init_rcu(&ep->hlnode);
-
 	hash_for_each_safe(port->muxed_ep, bkt_ep, tmp_ep, ep, hlnode) {
 		unregister_netdevice_queue(ep->egress_dev, &list);
 		rmnet_vnd_dellink(ep->mux_id, port, ep);
@@ -345,12 +347,29 @@ static int rmnet_config_notify_cb(struct notifier_block *nb,
 				  unsigned long event, void *data)
 {
 	struct net_device *dev = netdev_notifier_info_to_dev(data);
+	int rc;
 
 	if (!dev)
 		return NOTIFY_DONE;
 
 	switch (event) {
+	case NETDEV_REGISTER:
+		if (dev->rtnl_link_ops == &rmnet_link_ops) {
+			rc = netdev_rx_handler_register(dev,
+							rmnet_rx_priv_handler,
+							NULL);
+
+			if (rc)
+				return NOTIFY_BAD;
+		}
+
+		break;
 	case NETDEV_UNREGISTER:
+		if (dev->rtnl_link_ops == &rmnet_link_ops) {
+			netdev_rx_handler_unregister(dev);
+			break;
+		}
+
 		netdev_dbg(dev, "Kernel unregister\n");
 		rmnet_force_unassociate_device(dev);
 		break;
@@ -408,6 +427,7 @@ static int rmnet_changelink(struct net_device *dev, struct nlattr *tb[],
 	struct rmnet_endpoint *ep;
 	struct rmnet_port *port;
 	u16 mux_id;
+	u32 data_format;
 	int rc = 0;
 
 	real_dev = __dev_get_by_index(dev_net(dev),
@@ -435,7 +455,10 @@ static int rmnet_changelink(struct net_device *dev, struct nlattr *tb[],
 		struct ifla_rmnet_flags *flags;
 
 		flags = nla_data(data[IFLA_RMNET_FLAGS]);
-		port->data_format = flags->flags & flags->mask;
+		data_format = flags->flags & flags->mask;
+		if (port->data_format & RMNET_INGRESS_FORMAT_PS)
+			data_format |= RMNET_INGRESS_FORMAT_PS;
+		port->data_format = data_format;
 	}
 
 	if (data[IFLA_RMNET_DFC_QOS]) {
@@ -699,10 +722,10 @@ void rmnet_get_packets(void *port, u64 *rx, u64 *tx)
 		for_each_possible_cpu(cpu) {
 			ps = per_cpu_ptr(priv->pcpu_stats, cpu);
 			do {
-				start = u64_stats_fetch_begin_irq(&ps->syncp);
+				start = u64_stats_fetch_begin(&ps->syncp);
 				*tx += ps->stats.tx_pkts;
 				*rx += ps->stats.rx_pkts;
-			} while (u64_stats_fetch_retry_irq(&ps->syncp, start));
+			} while (u64_stats_fetch_retry(&ps->syncp, start));
 		}
 	}
 	rcu_read_unlock();
@@ -824,154 +847,6 @@ int rmnet_get_dlmarker_info(void *port)
 }
 EXPORT_SYMBOL(rmnet_get_dlmarker_info);
 
-struct rmnet_endpoint *rmnet_get_ip6_endpoint(struct rmnet_port *port,
-					      struct in6_addr *addr)
-{
-	struct rmnet_endpoint *ep;
-
-	hlist_for_each_entry_rcu(ep, &port->muxed_ep[0], hlnode) {
-
-		if (!memcmp(&ep->in6addr, addr, sizeof(struct in6_addr))) {
-			return ep;
-		}
-	}
-
-	return NULL;
-}
-
-struct rmnet_endpoint *rmnet_get_ip6_route_endpoint(struct rmnet_port *port,
-						    struct in6_addr *saddr,
-						    struct in6_addr *daddr)
-{
-	struct rmnet_endpoint *ep;
-
-	hlist_for_each_entry_rcu(ep, &port->muxed_ep[0], hlnode) {
-
-		/* IP traffic will come as ll packet. Match with link local ep
-		 * if possible.
-		 */
-		if((ipv6_addr_type(&ep->in6addr) & IPV6_ADDR_LINKLOCAL) &&
-		   (ipv6_addr_type(saddr) & IPV6_ADDR_LINKLOCAL))
-			return ep;
-
-		if (!memcmp(&ep->in6addr, daddr, sizeof(struct in6_addr))) {
-			return ep;
-		}
-
-	}
-
-	return NULL;
-}
-
-struct rmnet_endpoint *rmnet_get_ip4_route_endpoint(struct rmnet_port *port,
-						    __be32 *ifa_address)
-{
-	struct rmnet_endpoint *ep;
-
-	hlist_for_each_entry_rcu(ep, &port->muxed_ep[0], hlnode) {
-		if (!memcmp(&ep->ifa_address, ifa_address, sizeof(__be32))) {
-			return ep;
-		}
-
-	}
-
-	return NULL;
-}
-
-static int rmnet_addr6_event(struct notifier_block *unused,
-			     unsigned long event, void *ptr)
-{
-	struct inet6_ifaddr *if6 = (struct inet6_ifaddr *)ptr;
-	struct net_device *dev = (struct net_device *)if6->idev->dev;
-	struct rmnet_endpoint *ep;
-	struct net_device *real_dev;
-	struct rmnet_priv *priv;
-	struct rmnet_port *port;
-
-	if (!netif_is_rmnet(dev))
-		return NOTIFY_OK;
-
-	priv = netdev_priv(dev);
-	real_dev = priv->real_dev;
-	port = rmnet_get_port_rtnl(real_dev);
-
-	if (!port)
-		return NOTIFY_OK;
-
-	switch (event) {
-	case NETDEV_UP:
-		ep = kzalloc(sizeof(*ep), GFP_ATOMIC);
-		if (!ep)
-			return NOTIFY_OK;
-
-		memcpy(&ep->in6addr, &if6->addr, sizeof(struct in6_addr));
-		ep->egress_dev = dev;
-
-		hlist_add_head_rcu(&ep->hlnode, &port->muxed_ep[0]);
-		break;
-	case NETDEV_DOWN:
-		ep = rmnet_get_ip6_endpoint(port, &if6->addr);
-		if (!ep)
-			return NOTIFY_OK;
-
-		hlist_del_init_rcu(&ep->hlnode);
-		kfree(ep);
-	}
-
-	return NOTIFY_OK;
-}
-
-static int rmnet_addr4_event(struct notifier_block *unused,
-			     unsigned long event, void *ptr)
-{
-	struct in_ifaddr *if4 = (struct in_ifaddr *)ptr;
-	struct net_device *dev = (struct net_device *)if4->ifa_dev->dev;
-	struct rmnet_endpoint *ep;
-	struct net_device *real_dev;
-	struct rmnet_priv *priv;
-	struct rmnet_port *port;
-
-	if (!netif_is_rmnet(dev))
-		return NOTIFY_OK;
-
-	priv = netdev_priv(dev);
-	real_dev = priv->real_dev;
-	port = rmnet_get_port_rtnl(real_dev);
-
-	if (!port)
-		return NOTIFY_OK;
-
-	switch (event) {
-	case NETDEV_UP:
-		ep = kzalloc(sizeof(*ep), GFP_ATOMIC);
-		if (!ep)
-			return NOTIFY_OK;
-
-		memcpy(&ep->ifa_address, &if4->ifa_address, sizeof(__be32));
-		ep->egress_dev = dev;
-
-		hlist_add_head_rcu(&ep->hlnode, &port->muxed_ep[0]);
-		break;
-	case NETDEV_DOWN:
-		ep = rmnet_get_ip4_route_endpoint(port, &if4->ifa_address);
-		if (!ep)
-			return NOTIFY_OK;
-
-		hlist_del_init_rcu(&ep->hlnode);
-		kfree(ep);
-	}
-
-	return NOTIFY_OK;
-}
-
-static struct notifier_block rmnet_addr6_notifier_block __read_mostly = {
-	.notifier_call = rmnet_addr6_event,
-};
-
-static struct notifier_block rmnet_addr4_notifier_block __read_mostly = {
-	.notifier_call = rmnet_addr4_event,
-};
-
 /* Startup/Shutdown */
 
 static int __init rmnet_init(void)
@@ -983,16 +858,10 @@ static int __init rmnet_init(void)
 		return rc;
 
 	rc = rtnl_link_register(&rmnet_link_ops);
-	if (rc != 0)
-		goto err0;
-
-	rc = register_inet6addr_notifier(&rmnet_addr6_notifier_block);
-	if (rc != 0)
-		goto err1;
-
-	rc = register_inetaddr_notifier(&rmnet_addr4_notifier_block);
-	if (rc != 0)
-		goto err2;
+	if (rc != 0) {
+		unregister_netdevice_notifier(&rmnet_dev_notifier);
+		return rc;
+	}
 
 	rc = rmnet_ll_init();
 	if (rc != 0) {
@@ -1004,21 +873,11 @@ static int __init rmnet_init(void)
 	rmnet_core_genl_init();
 
 	try_module_get(THIS_MODULE);
-	return 0;
-
-err2:
-	unregister_inet6addr_notifier(&rmnet_addr6_notifier_block);
-err1:
-	rtnl_link_unregister(&rmnet_link_ops);
-err0:
-	unregister_netdevice_notifier(&rmnet_dev_notifier);
 	return rc;
 }
 
 static void __exit rmnet_exit(void)
 {
-	unregister_inetaddr_notifier(&rmnet_addr4_notifier_block);
-	unregister_inet6addr_notifier(&rmnet_addr6_notifier_block);
 	unregister_netdevice_notifier(&rmnet_dev_notifier);
 	rtnl_link_unregister(&rmnet_link_ops);
 	rmnet_ll_exit();

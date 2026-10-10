@@ -1,4 +1,5 @@
 /* Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -9,18 +10,26 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-
+#include <linux/version.h>
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM dfc
 #undef TRACE_INCLUDE_PATH
-#define TRACE_INCLUDE_PATH ../../../../sm8475-modules/qcom/opensource/datarmnet/core
-#ifdef RMNET_LA_PLATFORM
-#define TRACE_INCLUDE_PATH ../../../../sm8475-modules/qcom/opensource/datarmnet/core
-#elif RMNET_TRACE_INCLUDE_LE
-#define TRACE_INCLUDE_PATH ../../../../../../../datarmnet/core
+
+#ifndef RMNET_TRACE_INCLUDE_PATH
+#if defined(CONFIG_RMNET_LA_PLATFORM) || defined(RMNET_LA_PLATFORM)
+#ifdef CONFIG_ARCH_KHAJE
+#define RMNET_TRACE_INCLUDE_PATH ../../../../../sm8475-modules/qcom/opensource/datarmnet/core
 #else
-#define TRACE_INCLUDE_PATH ../../../../../../../src/datarmnet/core
-#endif
+#define RMNET_TRACE_INCLUDE_PATH ../../../../sm8475-modules/qcom/opensource/datarmnet/core
+#endif /* CONFIG_ARCH_KHAJE */
+#elif defined(__arch_um__)
+#define RMNET_TRACE_INCLUDE_PATH ../../datarmnet/core
+#else
+#define RMNET_TRACE_INCLUDE_PATH ../../../../../../../datarmnet/core
+#endif /* CONFIG_RMNET_LA_PLATFORM || RMNET_LA_PLATFORM */
+#endif /* RMNET_TRACE_INCLUDE_PATH */
+
+#define TRACE_INCLUDE_PATH RMNET_TRACE_INCLUDE_PATH
 #define TRACE_INCLUDE_FILE dfc
 
 #if !defined(_TRACE_DFC_H) || defined(TRACE_HEADER_MULTI_READ)
@@ -104,7 +113,7 @@ TRACE_EVENT(dfc_flow_check,
 	),
 
 	TP_fast_assign(
-		__assign_str(dev_name, name)
+		__assign_str(dev_name, name);
 		__entry->bearer_id = bearer_id;
 		__entry->len = len;
 		__entry->mark = mark;
@@ -133,7 +142,7 @@ TRACE_EVENT(dfc_flow_info,
 	),
 
 	TP_fast_assign(
-		__assign_str(dev_name, name)
+		__assign_str(dev_name, name);
 		__entry->bid = bearer_id;
 		__entry->fid = flow_id;
 		__entry->ip = ip_type;
@@ -248,25 +257,29 @@ TRACE_EVENT(dfc_tx_link_status_ind,
 
 TRACE_EVENT(dfc_qmap,
 
-	TP_PROTO(const void *data, size_t len, bool in),
+	TP_PROTO(const void *data, size_t len, bool in, u8 chn),
 
-	TP_ARGS(data, len, in),
+	TP_ARGS(data, len, in, chn),
 
 	TP_STRUCT__entry(
 		__field(bool, in)
 		__field(size_t, len)
 		__dynamic_array(u8, data, len)
+		__field(u8, chn)
 	),
 
 	TP_fast_assign(
 		__entry->in = in;
 		__entry->len = len;
 		memcpy(__get_dynamic_array(data), data, len);
+		__entry->chn = chn;
 	),
 
-	TP_printk("%s [%s]",
-		__entry->in ? "<--" : "-->",
-		__print_hex(__get_dynamic_array(data), __entry->len))
+	TP_printk("[0x%02x]:[%zu] %s %s", __entry->chn, __entry->len,
+		  __entry->in ? "<--" : "-->",
+		  __print_array(__get_dynamic_array(data),
+				__entry->len < 80 ? __entry->len : 80,
+				sizeof(u8)))
 );
 
 TRACE_EVENT(dfc_adjust_grant,
@@ -335,7 +348,7 @@ TRACE_EVENT(dfc_ll_switch,
 	),
 
 	TP_fast_assign(
-		__assign_str(cmd_str, cmd)
+		__assign_str(cmd_str, cmd);
 		__entry->type = type;
 		__entry->num_bearer = num_bearer;
 		memcpy(__get_dynamic_array(bearers), bearers, num_bearer);
@@ -366,6 +379,25 @@ TRACE_EVENT(dfc_set_powersave_mode,
 	TP_printk("set powersave mode to %s",
 		__entry->enable ? "enable" : "disable")
 );
+
+TRACE_EVENT(dfc_pm_event,
+
+	TP_PROTO(int event),
+
+	TP_ARGS(event),
+
+	TP_STRUCT__entry(
+		__field(int, event)
+	),
+
+	TP_fast_assign(
+		__entry->event = event;
+	),
+
+	TP_printk("Got PM event from notifier %d",
+		  __entry->event)
+);
+
 
 #endif /* _TRACE_DFC_H */
 

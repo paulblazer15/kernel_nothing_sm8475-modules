@@ -1,4 +1,5 @@
 /* Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -24,6 +25,10 @@
 			    sizeof(struct rmnet_map_control_command_header))
 
 #define RMNET_DL_IND_TRL_SIZE (sizeof(struct rmnet_map_dl_ind_trl) + \
+			       sizeof(struct rmnet_map_header) + \
+			       sizeof(struct rmnet_map_control_command_header))
+
+#define RMNET_PB_IND_HDR_SIZE (sizeof(struct rmnet_map_pb_ind_hdr) + \
 			       sizeof(struct rmnet_map_header) + \
 			       sizeof(struct rmnet_map_control_command_header))
 
@@ -116,6 +121,51 @@ rmnet_map_dl_trl_notify_v2(struct rmnet_port *port,
 
 	list_for_each_entry(tmp, &port->dl_list, list)
 		tmp->dl_trl_handler_v2(dltrl, qcmd);
+}
+
+void rmnet_map_pb_ind_notify(struct rmnet_port *port,
+			     struct rmnet_map_pb_ind_hdr *pbhdr)
+{
+	struct rmnet_map_pb_ind *tmp;
+
+	list_for_each_entry(tmp, &port->pb_list, list) {
+		port->stats.pb_marker_seq = pbhdr->le.seq_num;
+		tmp->pb_ind_handler(pbhdr);
+	}
+}
+
+static void rmnet_map_process_pb_ind(struct sk_buff *skb,
+				     struct rmnet_port *port,
+				     bool rmnet_perf)
+{
+	struct rmnet_map_pb_ind_hdr *pbhdr;
+	u32 data_format;
+	bool is_dl_mark_v2;
+
+	if (skb->len < RMNET_PB_IND_HDR_SIZE)
+		return;
+
+	data_format = port->data_format;
+	is_dl_mark_v2 = data_format & RMNET_INGRESS_FORMAT_DL_MARKER_V2;
+	if (is_dl_mark_v2) {
+		pskb_pull(skb, sizeof(struct rmnet_map_header) +
+				  sizeof(struct rmnet_map_control_command_header));
+	}
+
+	pbhdr = (struct rmnet_map_pb_ind_hdr *)rmnet_map_data_ptr(skb);
+	port->stats.pb_marker_count++;
+
+	if (is_dl_mark_v2)
+		rmnet_map_pb_ind_notify(port, pbhdr);
+
+	if (rmnet_perf) {
+		unsigned int pull_size;
+
+		pull_size = sizeof(struct rmnet_map_pb_ind_hdr);
+		if (data_format & RMNET_FLAGS_INGRESS_MAP_CKSUMV4)
+			pull_size += sizeof(struct rmnet_map_dl_csum_trailer);
+		pskb_pull(skb, pull_size);
+	}
 }
 
 static void rmnet_map_process_flow_start(struct sk_buff *skb,
@@ -262,6 +312,10 @@ int rmnet_map_flow_command(struct sk_buff *skb, struct rmnet_port *port,
 		rmnet_map_process_flow_end(skb, port, rmnet_perf);
 		break;
 
+	case RMNET_MAP_COMMAND_PB_BYTES:
+		rmnet_map_process_pb_ind(skb, port, rmnet_perf);
+		break;
+
 	default:
 		return 1;
 	}
@@ -280,48 +334,41 @@ void rmnet_map_cmd_exit(struct rmnet_port *port)
 
 	list_for_each_entry_safe(tmp, idx, &port->dl_list, list)
 		list_del_rcu(&tmp->list);
+
+	list_for_each_entry_safe(tmp, idx, &port->pb_list, list)
+		list_del_rcu(&tmp->list);
 }
 
 void rmnet_map_cmd_init(struct rmnet_port *port)
 {
 	INIT_LIST_HEAD(&port->dl_list);
+	INIT_LIST_HEAD(&port->pb_list);
 }
 
+
 int rmnet_map_dl_ind_register(struct rmnet_port *port,
-			      struct rmnet_map_dl_ind *dl_ind)
+			       struct rmnet_map_dl_ind *new_node)
 {
-	struct rmnet_map_dl_ind *dl_ind_iterator;
-	bool empty_ind_list = true;
+	struct rmnet_map_dl_ind *curr;
+	bool inserted = false;
 
-	if (!port || !dl_ind || !dl_ind->dl_hdr_handler_v2 ||
-	    !dl_ind->dl_trl_handler_v2)
+	if (!port || !new_node || !new_node->dl_hdr_handler_v2 ||
+	    !new_node->dl_trl_handler_v2) {
 		return -EINVAL;
-
-	list_for_each_entry_rcu(dl_ind_iterator, &port->dl_list, list) {
-		empty_ind_list = false;
-		if (dl_ind_iterator->priority < dl_ind->priority) {
-			if (dl_ind_iterator->list.next) {
-				if (dl_ind->priority
-				    < list_entry_rcu(dl_ind_iterator->list.next,
-				    typeof(*dl_ind_iterator), list)->priority) {
-					list_add_rcu(&dl_ind->list,
-						     &dl_ind_iterator->list);
-					break;
-				}
-			} else {
-				list_add_rcu(&dl_ind->list,
-					     &dl_ind_iterator->list);
-				break;
-			}
-		} else {
-			list_add_tail_rcu(&dl_ind->list,
-					  &dl_ind_iterator->list);
-			break;
+	}
+	/* Traverse until we find entry that is larger than newnode priority
+	 * Prepend to that 1st entry that is larger to maintain sorted order
+	 */
+	list_for_each_entry_rcu(curr, &port->dl_list, list) {
+		if (new_node->priority <= curr->priority) {
+			list_add_tail_rcu(&new_node->list, &curr->list);
+			inserted = true;
 		}
 	}
 
-	if (empty_ind_list)
-		list_add_rcu(&dl_ind->list, &port->dl_list);
+	/* If no larger priority found append to end of list */
+	if (!inserted)
+		list_add_tail_rcu(&new_node->list, &port->dl_list);
 
 	return 0;
 }
@@ -332,7 +379,7 @@ int rmnet_map_dl_ind_deregister(struct rmnet_port *port,
 {
 	struct rmnet_map_dl_ind *tmp;
 
-	if (!port || !dl_ind)
+	if (!port || !dl_ind || !(port->dl_list.next))
 		return -EINVAL;
 
 	list_for_each_entry(tmp, &port->dl_list, list) {
@@ -346,3 +393,50 @@ done:
 	return 0;
 }
 EXPORT_SYMBOL(rmnet_map_dl_ind_deregister);
+
+int rmnet_map_pb_ind_register(struct rmnet_port *port,
+			      struct rmnet_map_pb_ind *new_node)
+{
+	struct rmnet_map_pb_ind *curr;
+	bool inserted = false;
+
+	if (!port || !new_node || !new_node->pb_ind_handler)
+		return -EINVAL;
+
+	/* Traverse until we find entry that is larger than newnode priority
+	 * Prepend to that 1st entry that is larger to maintain sorted order
+	 */
+	 list_for_each_entry_rcu(curr, &port->pb_list, list) {
+		if (new_node->priority <= curr->priority) {
+			list_add_tail_rcu(&new_node->list, &curr->list);
+			inserted = true;
+		}
+	}
+
+	/* If no larger priority found append to end of list */
+	if (!inserted)
+		list_add_tail_rcu(&new_node->list, &port->pb_list);
+
+	return 0;
+}
+EXPORT_SYMBOL(rmnet_map_pb_ind_register);
+
+int rmnet_map_pb_ind_deregister(struct rmnet_port *port,
+				struct rmnet_map_pb_ind *pb_ind)
+{
+	struct rmnet_map_pb_ind *tmp;
+
+	if (!port || !pb_ind || !(port->pb_list.next))
+		return -EINVAL;
+
+	list_for_each_entry(tmp, &port->pb_list, list) {
+		if (tmp == pb_ind) {
+			list_del_rcu(&pb_ind->list);
+			goto done;
+		}
+	}
+
+done:
+	return 0;
+}
+EXPORT_SYMBOL(rmnet_map_pb_ind_deregister);

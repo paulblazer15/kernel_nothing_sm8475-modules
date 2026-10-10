@@ -1,5 +1,5 @@
 /* Copyright (c) 2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -15,7 +15,9 @@
 
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
-#include <linux/ipa.h>
+#if !defined(__arch_um__)
+	#include <linux/ipa.h>
+#endif /* !defined(__arch_um__) */
 #include <linux/if_ether.h>
 #include <linux/interrupt.h>
 #include <linux/version.h>
@@ -27,19 +29,14 @@
 
 #define MAX_Q_LEN 1000
 
+#if !defined(__arch_um__)
 static struct rmnet_ll_endpoint *rmnet_ll_ipa_ep;
 static struct sk_buff_head tx_pending_list;
 extern spinlock_t rmnet_ll_tx_lock;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 9, 0)
-static void rmnet_ll_ipa_tx_pending(unsigned long data);
-DECLARE_TASKLET(tx_pending_task, rmnet_ll_ipa_tx_pending, 0);
-static void rmnet_ll_ipa_tx_pending(unsigned long data)
-#else
 static void rmnet_ll_ipa_tx_pending(struct tasklet_struct *t);
 DECLARE_TASKLET(tx_pending_task, rmnet_ll_ipa_tx_pending);
 static void rmnet_ll_ipa_tx_pending(struct tasklet_struct *t)
-#endif
 {
 	struct rmnet_ll_stats *stats = rmnet_ll_get_stats();
 	struct sk_buff *skb;
@@ -90,7 +87,10 @@ static void rmnet_ll_ipa_rx(void *arg, void *rx_data)
 	while (tmp) {
 		/* Mark the SKB as low latency */
 		tmp->priority = 0xda1a;
-		tmp = skb_shinfo(tmp)->frag_list;
+		if (tmp == skb)
+			tmp = skb_shinfo(tmp)->frag_list;
+		else
+			tmp = tmp->next;
 	}
 
 	stats->rx_pkts++;
@@ -135,6 +135,7 @@ static void rmnet_ll_ipa_remove(void *arg)
 static void rmnet_ll_ipa_ready(void * __unused)
 {
 	int rc;
+	int *status = rmnet_ll_get_ipa_ready_status();
 
 	rc = ipa_register_rmnet_ll_cb(rmnet_ll_ipa_probe,
 				      (void *)&rmnet_ll_ipa_ep,
@@ -142,9 +143,17 @@ static void rmnet_ll_ipa_ready(void * __unused)
 				      (void *)&rmnet_ll_ipa_ep,
 				      rmnet_ll_ipa_rx,
 				      (void *)&rmnet_ll_ipa_ep);
-	if (rc)
+	if (rc) {
 		pr_err("%s(): Registering IPA LL callback failed with rc %d\n",
 		       __func__, rc);
+		if  (rc != -ENXIO)
+			*status = RMNET_LL_PIPE_FAILED;
+		else
+			*status = RMNET_LL_PIPE_FAILED_ENXIO;
+		return;
+	}
+
+	*status = RMNET_LL_PIPE_SUCCESS;
 }
 
 static int rmnet_ll_ipa_tx(struct sk_buff *skb)
@@ -208,6 +217,11 @@ static int rmnet_ll_ipa_exit(void)
 
 	return 0;
 }
+#else
+static int rmnet_ll_ipa_tx(struct sk_buff *skb){return 0;};
+static int rmnet_ll_ipa_init(void){return 0;}
+static int rmnet_ll_ipa_exit(void){return 0;};
+#endif /* !defined(__arch_um__) */
 
 /* Export operations struct to the main framework */
 struct rmnet_ll_client_ops rmnet_ll_client = {

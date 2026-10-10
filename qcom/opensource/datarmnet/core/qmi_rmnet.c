@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -16,6 +16,8 @@
 #include "qmi_rmnet_i.h"
 #include "qmi_rmnet.h"
 #include "rmnet_qmi.h"
+#include "rmnet_module.h"
+#include "rmnet_hook.h"
 #include "dfc.h"
 #include <linux/rtnetlink.h>
 #include <uapi/linux/rtnetlink.h>
@@ -25,6 +27,8 @@
 #include <linux/moduleparam.h>
 #include <linux/ip.h>
 #include <linux/ipv6.h>
+#include <linux/suspend.h>
+#include <linux/notifier.h>
 
 #define NLMSG_FLOW_ACTIVATE 1
 #define NLMSG_FLOW_DEACTIVATE 2
@@ -577,6 +581,9 @@ struct rmnet_bearer_map *qmi_rmnet_get_bearer_noref(struct qos_info *qos_info,
 	return bearer;
 }
 
+static int qmi_rmnet_pm_notify_cb(struct notifier_block *notifier,
+		unsigned long pm_event, void *unused);
+
 #else
 static inline void
 qmi_rmnet_update_flow_map(struct rmnet_flow_map *itm,
@@ -623,9 +630,16 @@ qmi_rmnet_setup_client(void *port, struct qmi_info *qmi, struct tcmsg *tcm)
 			return -ENOMEM;
 
 		rmnet_init_qmi_pt(port, qmi);
+		/* pm-register is only needed once when first client is setup
+		 * and not per client
+		 */
+		((struct rmnet_port *)port)->dfc_pm_notifier.notifier_call
+					 = qmi_rmnet_pm_notify_cb;
+		register_pm_notifier(&(((struct rmnet_port *)port)->dfc_pm_notifier));
 	}
 
 	qmi->flag = tcm->tcm_ifindex;
+	qmi->ps_enabled = true;
 	qmi->ps_ext = FLAG_TO_PS_EXT(qmi->flag);
 	svc.instance = tcm->tcm_handle;
 	svc.ep_type = tcm->tcm_info;
@@ -710,8 +724,10 @@ int qmi_rmnet_change_link(struct net_device *dev, void *port, void *tcm_pt,
 {
 	struct qmi_info *qmi = (struct qmi_info *)rmnet_get_qmi_pt(port);
 	struct tcmsg *tcm = (struct tcmsg *)tcm_pt;
+	struct notifier_block *nb;
 	void *wda_data = NULL;
 	int rc = 0;
+
 
 	switch (tcm->tcm_family) {
 	case NLMSG_FLOW_ACTIVATE:
@@ -742,6 +758,8 @@ int qmi_rmnet_change_link(struct net_device *dev, void *port, void *tcm_pt,
 			if (qmi &&
 			    !qmi_rmnet_has_client(qmi) &&
 			    !qmi_rmnet_has_pending(qmi)) {
+				nb = &(((struct rmnet_port *)port)->dfc_pm_notifier);
+				unregister_pm_notifier(nb);
 				rmnet_reset_qmi_pt(port);
 				kfree(qmi);
 			}
@@ -1220,6 +1238,57 @@ int qmi_rmnet_set_powersave_mode(void *port, uint8_t enable, u8 num_bearers,
 }
 EXPORT_SYMBOL(qmi_rmnet_set_powersave_mode);
 
+static int qmi_rmnet_pm_notify_cb(struct notifier_block *notifier,
+		unsigned long pm_event, void *unused)
+{
+	struct qmi_info *qmi;
+	struct rmnet_port *port;
+	u8 num_bearers;
+
+	port = container_of(notifier, struct rmnet_port, dfc_pm_notifier);
+	qmi = port->qmi_info;
+
+	trace_dfc_pm_event(pm_event);
+	switch (pm_event) {
+	case PM_SUSPEND_PREPARE:
+		cancel_delayed_work_sync(&rmnet_work->work);
+		if (!qmi->ps_enabled) {
+			qmi->ps_ignore_grant = true;
+			qmi->ps_enabled = true;
+			rmnet_module_hook_aps_data_inactive();
+			/* Needed Memory barrier */
+			smp_mb();
+
+			num_bearers = sizeof(ps_bearer_id);
+			memset(ps_bearer_id, 0, sizeof(ps_bearer_id));
+			rmnet_prepare_ps_bearers(port, &num_bearers,
+						 ps_bearer_id);
+
+			/* Enter powersave */
+			if (dfc_qmap)
+				dfc_qmap_set_powersave(1, num_bearers, ps_bearer_id);
+			else
+				qmi_rmnet_set_powersave_mode(port, 1,
+							     num_bearers, ps_bearer_id);
+
+			if (rmnet_get_powersave_notif(port))
+				qmi_rmnet_ps_on_notify(port);
+
+		}
+		break;
+	case PM_POST_SUSPEND:
+		/* Clear the bit before enabling flow so pending packets
+		 * can trigger the work again
+		 */
+		clear_bit(PS_WORK_ACTIVE_BIT, &qmi->ps_work_active);
+		break;
+	default:
+		break;
+	}
+	return NOTIFY_DONE;
+}
+
+
 static void qmi_rmnet_work_restart(void *port)
 {
 	rcu_read_lock();
@@ -1363,6 +1432,7 @@ static void qmi_rmnet_check_stats_2(struct work_struct *work)
 	if (!rxd && !txd) {
 		qmi->ps_ignore_grant = true;
 		qmi->ps_enabled = true;
+		rmnet_module_hook_aps_data_inactive();
 		clear_bit(PS_WORK_ACTIVE_BIT, &qmi->ps_work_active);
 
 		smp_mb();
@@ -1440,7 +1510,7 @@ void qmi_rmnet_work_init(void *port)
 }
 EXPORT_SYMBOL(qmi_rmnet_work_init);
 
-void qmi_rmnet_work_maybe_restart(void *port)
+void qmi_rmnet_work_maybe_restart(void *port, void *desc, struct sk_buff *skb)
 {
 	struct qmi_info *qmi;
 
@@ -1451,6 +1521,9 @@ void qmi_rmnet_work_maybe_restart(void *port)
 	if (!test_and_set_bit(PS_WORK_ACTIVE_BIT, &qmi->ps_work_active)) {
 		qmi->ps_ignore_grant = false;
 		qmi_rmnet_work_restart(port);
+		if (desc || skb)
+			rmnet_module_hook_aps_data_active(
+				(struct rmnet_frag_descriptor *)desc, skb);
 	}
 }
 EXPORT_SYMBOL(qmi_rmnet_work_maybe_restart);
@@ -1462,6 +1535,8 @@ void qmi_rmnet_work_exit(void *port)
 
 	rmnet_work_quit = true;
 	synchronize_rcu();
+
+	unregister_pm_notifier(&(((struct rmnet_port *)port)->dfc_pm_notifier));
 
 	rmnet_work_inited = false;
 	cancel_delayed_work_sync(&rmnet_work->work);

@@ -1,5 +1,5 @@
 /* Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -22,17 +22,22 @@
 #include "rmnet_config.h"
 #include "rmnet_descriptor.h"
 #include "rmnet_handlers.h"
+#include "rmnet_module.h"
 #include "rmnet_private.h"
 #include "rmnet_vnd.h"
 #include "rmnet_qmi.h"
 #include "rmnet_trace.h"
 #include "qmi_rmnet.h"
+#include "rmnet_mem.h"
 
 #define RMNET_FRAG_DESCRIPTOR_POOL_SIZE 64
 #define RMNET_DL_IND_HDR_SIZE (sizeof(struct rmnet_map_dl_ind_hdr) + \
 			       sizeof(struct rmnet_map_header) + \
 			       sizeof(struct rmnet_map_control_command_header))
 #define RMNET_DL_IND_TRL_SIZE (sizeof(struct rmnet_map_dl_ind_trl) + \
+			       sizeof(struct rmnet_map_header) + \
+			       sizeof(struct rmnet_map_control_command_header))
+#define RMNET_PB_IND_HDR_SIZE (sizeof(struct rmnet_map_pb_ind_hdr) + \
 			       sizeof(struct rmnet_map_header) + \
 			       sizeof(struct rmnet_map_control_command_header))
 
@@ -43,13 +48,17 @@
 #define rmnet_descriptor_for_each_frag_safe_reverse(p, tmp, desc) \
 	list_for_each_entry_safe_reverse(p, tmp, &desc->frags, list)
 
-typedef void (*rmnet_perf_desc_hook_t)(struct rmnet_frag_descriptor *frag_desc,
-				       struct rmnet_port *port);
-typedef void (*rmnet_perf_chain_hook_t)(void);
+/* These functions are ensure that line doesn't exceed 80 chars */
+static void rmnet_common_coal_stat(uint8_t mux_id, uint32_t type)
+{
+	rmnet_module_hook_perf_coal_common_stat(mux_id, type);
+}
 
-typedef void (*rmnet_perf_tether_ingress_hook_t)(struct tcphdr *tp, struct sk_buff *skb);
-rmnet_perf_tether_ingress_hook_t rmnet_perf_tether_ingress_hook __rcu __read_mostly;
-EXPORT_SYMBOL(rmnet_perf_tether_ingress_hook);
+static void rmnet_coal_stat(uint8_t mux_id, uint8_t veid, uint64_t len,
+			    uint32_t type)
+{
+	rmnet_module_hook_perf_coal_stat(mux_id, veid, len, type);
+}
 
 struct rmnet_frag_descriptor *
 rmnet_get_frag_descriptor(struct rmnet_port *port)
@@ -286,9 +295,14 @@ int rmnet_frag_descriptor_add_frag(struct rmnet_frag_descriptor *frag_desc,
 
 	INIT_LIST_HEAD(&frag->list);
 	get_page(p);
+#if (KERNEL_VERSION(6, 5, 0) > LINUX_VERSION_CODE)
+	/* Needed kernel version check for compatibility */
 	__skb_frag_set_page(&frag->frag, p);
 	skb_frag_size_set(&frag->frag, len);
 	skb_frag_off_set(&frag->frag, page_offset);
+#else
+	skb_frag_fill_page_desc(&frag->frag, p, page_offset, len);
+#endif
 	list_add_tail(&frag->list, &frag_desc->frags);
 	frag_desc->len += len;
 	return 0;
@@ -424,26 +438,67 @@ static u8 rmnet_frag_do_flow_control(struct rmnet_map_header *qmap,
 
 static void rmnet_frag_send_ack(struct rmnet_map_header *qmap,
 				unsigned char type,
+				struct rmnet_map_control_command *cmd,
 				struct rmnet_port *port)
 {
-	struct rmnet_map_control_command *cmd;
+	struct rmnet_map_control_command *_cmd;
 	struct net_device *dev = port->dev;
 	struct sk_buff *skb;
-	u16 alloc_len = ntohs(qmap->pkt_len) + sizeof(*qmap);
+	u16 alloc_len = ntohs(qmap->pkt_len) + RMNET_MAP_DEAGGR_SPACING;
 
 	skb = alloc_skb(alloc_len, GFP_ATOMIC);
 	if (!skb)
 		return;
 
+	skb_reserve(skb, RMNET_MAP_DEAGGR_HEADROOM);
+
+	skb_put(skb, ntohs(qmap->pkt_len));
+	memcpy(skb->data, cmd, ntohs(qmap->pkt_len));
+
+	skb_push(skb, sizeof(*qmap));
+	memcpy(skb->data, qmap, sizeof(*qmap));
+
 	skb->protocol = htons(ETH_P_MAP);
 	skb->dev = dev;
 
-	cmd = rmnet_map_get_cmd_start(skb);
-	cmd->cmd_type = type & 0x03;
+	_cmd = rmnet_map_get_cmd_start(skb);
+	_cmd->cmd_type = type & 0x03;
 
 	netif_tx_lock(dev);
 	dev->netdev_ops->ndo_start_xmit(skb, dev);
 	netif_tx_unlock(dev);
+}
+
+static void
+rmnet_frag_process_pb_ind(struct rmnet_frag_descriptor *frag_desc,
+			  struct rmnet_map_control_command_header *cmd,
+			  struct rmnet_port *port,
+			  u16 cmd_len)
+{
+	struct rmnet_map_pb_ind_hdr *pbhdr, __pbhdr;
+	u32 offset = sizeof(struct rmnet_map_header);
+	u32 data_format;
+	bool is_dl_mark_v2;
+
+	if (cmd_len + offset < RMNET_PB_IND_HDR_SIZE)
+		return;
+
+	data_format = port->data_format;
+	is_dl_mark_v2 = data_format & RMNET_INGRESS_FORMAT_DL_MARKER_V2;
+	pbhdr = rmnet_frag_header_ptr(frag_desc, offset + sizeof(*cmd),
+				      sizeof(*pbhdr), &__pbhdr);
+	if (!pbhdr)
+		return;
+
+	port->stats.pb_marker_count++;
+
+	/* If a target is taking frag path, we can assume DL marker v2 is in
+	 * play
+	 */
+	if (is_dl_mark_v2) {
+		rmnet_map_pb_ind_notify(port, pbhdr);
+		rmnet_mem_pb_ind();
+	}
 }
 
 static void
@@ -544,7 +599,7 @@ void rmnet_frag_command(struct rmnet_frag_descriptor *frag_desc,
 		break;
 	}
 	if (rc == RMNET_MAP_COMMAND_ACK)
-		rmnet_frag_send_ack(qmap, rc, port);
+		rmnet_frag_send_ack(qmap, rc, cmd, port);
 }
 
 int rmnet_frag_flow_command(struct rmnet_frag_descriptor *frag_desc,
@@ -572,6 +627,9 @@ int rmnet_frag_flow_command(struct rmnet_frag_descriptor *frag_desc,
 		rmnet_frag_process_flow_end(frag_desc, cmd, port, pkt_len);
 		break;
 
+	case RMNET_MAP_COMMAND_PB_BYTES:
+		rmnet_frag_process_pb_ind(frag_desc, cmd, port, pkt_len);
+		break;
 	default:
 		return 1;
 	}
@@ -641,7 +699,7 @@ static int rmnet_frag_deaggregate_one(struct sk_buff *skb,
 	pkt_len += sizeof(*maph);
 	if (port->data_format & RMNET_FLAGS_INGRESS_MAP_CKSUMV4) {
 		pkt_len += sizeof(struct rmnet_map_dl_csum_trailer);
-	} else if ((port->data_format & (RMNET_FLAGS_INGRESS_MAP_CKSUMV5 |
+	} else if ((port->data_format & (RMNET_PRIV_FLAGS_INGRESS_MAP_CKSUMV5 |
 					 RMNET_FLAGS_INGRESS_COALESCE)) &&
 		   !maph->cd_bit) {
 		u32 hsize = 0;
@@ -755,7 +813,6 @@ static void rmnet_frag_gso_stamp(struct sk_buff *skb,
 static void rmnet_frag_partial_csum(struct sk_buff *skb,
 				    struct rmnet_frag_descriptor *frag_desc)
 {
-	rmnet_perf_tether_ingress_hook_t rmnet_perf_tether_ingress;
 	struct iphdr *iph = (struct iphdr *)skb->data;
 	__sum16 pseudo;
 	u16 pkt_len = skb->len - frag_desc->ip_len;
@@ -783,9 +840,7 @@ static void rmnet_frag_partial_csum(struct sk_buff *skb,
 		tp->check = pseudo;
 		skb->csum_offset = offsetof(struct tcphdr, check);
 
-		rmnet_perf_tether_ingress = rcu_dereference(rmnet_perf_tether_ingress_hook);
-		if (rmnet_perf_tether_ingress)
-			rmnet_perf_tether_ingress(tp, skb);
+		rmnet_module_hook_perf_tether_ingress(tp, skb);
 	} else {
 		struct udphdr *up = (struct udphdr *)
 				    ((u8 *)iph + frag_desc->ip_len);
@@ -797,6 +852,35 @@ static void rmnet_frag_partial_csum(struct sk_buff *skb,
 
 	skb->ip_summed = CHECKSUM_PARTIAL;
 	skb->csum_start = (u8 *)iph + frag_desc->ip_len - skb->head;
+}
+
+#define PFN_ENTRY_MAX (128)
+#define PFNI (count++ % PFN_ENTRY_MAX)
+static void rmnet_descriptor_trace_pfn(struct sk_buff *skb)
+{
+	struct skb_shared_info *shinfo;
+	struct sk_buff *frag_iter;
+	unsigned long rpfn[PFN_ENTRY_MAX];
+	int i, count;
+
+	if (!trace_print_pfn_enabled())
+		return;
+
+	shinfo = skb_shinfo(skb);
+	memset(rpfn, 0, sizeof(rpfn));
+	count = 0;
+
+	for (i = 0; i < shinfo->nr_frags; i++)
+		rpfn[PFNI] = page_to_pfn(skb_frag_page(&shinfo->frags[i]));
+
+	skb_walk_frags(skb, frag_iter) {
+		shinfo = skb_shinfo(frag_iter);
+
+		for (i = 0; i < shinfo->nr_frags; i++)
+			rpfn[PFNI] = page_to_pfn(skb_frag_page(&shinfo->frags[i]));
+	}
+
+	trace_print_pfn(skb, rpfn, count);
 }
 
 /* Allocate and populate an skb to contain the packet represented by the
@@ -1020,11 +1104,14 @@ skip_frags:
 		}
 
 		trace_print_tcp_rx(head_skb, saddr, daddr, tcp_hdr(head_skb));
+
+		rmnet_descriptor_trace_pfn(head_skb);
 	}
 skip_trace_print_tcp_rx:
 
 	if (trace_print_udp_rx_enabled()) {
 		char saddr[INET6_ADDRSTRLEN], daddr[INET6_ADDRSTRLEN];
+		u16 ip_id = 0;
 
 		if (!frag_desc->hdrs_valid && !frag_desc->trans_len)
 			goto skip_trace_print_udp_rx;
@@ -1038,6 +1125,7 @@ skip_trace_print_tcp_rx:
 
 			snprintf(saddr, INET6_ADDRSTRLEN, "%pI4", &ip_hdr(head_skb)->saddr);
 			snprintf(daddr, INET6_ADDRSTRLEN, "%pI4", &ip_hdr(head_skb)->daddr);
+			ip_id = ntohs(ip_hdr(head_skb)->id);
 		}
 
 		if (head_skb->protocol == htons(ETH_P_IPV6)) {
@@ -1048,7 +1136,9 @@ skip_trace_print_tcp_rx:
 			snprintf(daddr, INET6_ADDRSTRLEN, "%pI6", &ipv6_hdr(head_skb)->daddr);
 		}
 
-		trace_print_udp_rx(head_skb, saddr, daddr, udp_hdr(head_skb));
+		trace_print_udp_rx(head_skb, saddr, daddr, udp_hdr(head_skb), ip_id);
+
+		rmnet_descriptor_trace_pfn(head_skb);
 	}
 skip_trace_print_udp_rx:
 
@@ -1158,6 +1248,7 @@ static void __rmnet_frag_segment_data(struct rmnet_frag_descriptor *coal_desc,
 
 	new_desc->csum_valid = csum_valid;
 	priv->stats.coal.coal_reconstruct++;
+	rmnet_common_coal_stat(priv->mux_id, 1);
 
 	/* Update meta information to move past the data we just segmented */
 	coal_desc->data_offset += dlen;
@@ -1324,6 +1415,15 @@ rmnet_frag_segment_coal_data(struct rmnet_frag_descriptor *coal_desc,
 		coal_desc->trans_len = th->doff * 4;
 		priv->stats.coal.coal_tcp++;
 		priv->stats.coal.coal_tcp_bytes += coal_desc->len;
+
+		if (coal_desc->ip_proto == 4)
+			rmnet_coal_stat(priv->mux_id,
+					coal_hdr.virtual_channel_id,
+					coal_desc->len, 0);
+		else
+			rmnet_coal_stat(priv->mux_id,
+					coal_hdr.virtual_channel_id,
+					coal_desc->len, 2);
 	} else if (coal_desc->trans_proto == IPPROTO_UDP) {
 		struct udphdr *uh, __uh;
 
@@ -1338,6 +1438,16 @@ rmnet_frag_segment_coal_data(struct rmnet_frag_descriptor *coal_desc,
 		priv->stats.coal.coal_udp_bytes += coal_desc->len;
 		if (coal_desc->ip_proto == 4 && !uh->check)
 			zero_csum = true;
+
+		if (coal_desc->ip_proto == 4)
+			rmnet_coal_stat(priv->mux_id,
+					coal_hdr.virtual_channel_id,
+					coal_desc->len, 1);
+
+		else
+			rmnet_coal_stat(priv->mux_id,
+					coal_hdr.virtual_channel_id,
+					coal_desc->len, 3);
 	} else {
 		priv->stats.coal.coal_trans_invalid++;
 		return;
@@ -1388,8 +1498,11 @@ rmnet_frag_segment_coal_data(struct rmnet_frag_descriptor *coal_desc,
 			 */
 			if (!gro) {
 				coal_desc->gso_segs = 1;
-				if (csum_err)
+				if (csum_err) {
 					priv->stats.coal.coal_csum_err++;
+					rmnet_common_coal_stat(priv->mux_id,
+							       0);
+				}
 
 				__rmnet_frag_segment_data(coal_desc, port,
 							  list, total_pkt,
@@ -1399,6 +1512,7 @@ rmnet_frag_segment_coal_data(struct rmnet_frag_descriptor *coal_desc,
 
 			if (csum_err) {
 				priv->stats.coal.coal_csum_err++;
+				rmnet_common_coal_stat(priv->mux_id, 0);
 
 				/* Segment out the good data */
 				if (coal_desc->gso_segs)
@@ -1437,29 +1551,37 @@ static void rmnet_frag_data_log_close_stats(struct rmnet_priv *priv, u8 type,
 	switch (type) {
 	case RMNET_MAP_COAL_CLOSE_NON_COAL:
 		stats->non_coal++;
+		rmnet_common_coal_stat(priv->mux_id, 2);
 		break;
 	case RMNET_MAP_COAL_CLOSE_IP_MISS:
 		stats->ip_miss++;
+		rmnet_common_coal_stat(priv->mux_id, 3);
 		break;
 	case RMNET_MAP_COAL_CLOSE_TRANS_MISS:
 		stats->trans_miss++;
+		rmnet_common_coal_stat(priv->mux_id, 4);
 		break;
 	case RMNET_MAP_COAL_CLOSE_HW:
 		switch (code) {
 		case RMNET_MAP_COAL_CLOSE_HW_NL:
 			stats->hw_nl++;
+			rmnet_common_coal_stat(priv->mux_id, 5);
 			break;
 		case RMNET_MAP_COAL_CLOSE_HW_PKT:
 			stats->hw_pkt++;
+			rmnet_common_coal_stat(priv->mux_id, 6);
 			break;
 		case RMNET_MAP_COAL_CLOSE_HW_BYTE:
 			stats->hw_byte++;
+			rmnet_common_coal_stat(priv->mux_id, 7);
 			break;
 		case RMNET_MAP_COAL_CLOSE_HW_TIME:
 			stats->hw_time++;
+			rmnet_common_coal_stat(priv->mux_id, 8);
 			break;
 		case RMNET_MAP_COAL_CLOSE_HW_EVICT:
 			stats->hw_evict++;
+			rmnet_common_coal_stat(priv->mux_id, 9);
 			break;
 		default:
 			break;
@@ -1467,6 +1589,7 @@ static void rmnet_frag_data_log_close_stats(struct rmnet_priv *priv, u8 type,
 		break;
 	case RMNET_MAP_COAL_CLOSE_COAL:
 		stats->coal++;
+		rmnet_common_coal_stat(priv->mux_id, 10);
 		break;
 	default:
 		break;
@@ -1707,6 +1830,8 @@ int rmnet_frag_process_next_hdr_packet(struct rmnet_frag_descriptor *frag_desc,
 			rmnet_recycle_frag_descriptor(frag_desc, port);
 		break;
 	case RMNET_MAP_HEADER_TYPE_CSUM_OFFLOAD:
+		rmnet_module_hook_perf_non_coal_stat(priv->mux_id, len);
+
 		if (unlikely(!(frag_desc->dev->features & NETIF_F_RXCSUM))) {
 			priv->stats.csum_sw++;
 		} else if (csum_hdr->csum_valid_required) {
@@ -1752,15 +1877,10 @@ int rmnet_frag_process_next_hdr_packet(struct rmnet_frag_descriptor *frag_desc,
 	return rc;
 }
 
-/* Perf hook handler */
-rmnet_perf_desc_hook_t rmnet_perf_desc_entry __rcu __read_mostly;
-EXPORT_SYMBOL(rmnet_perf_desc_entry);
-
 static void
 __rmnet_frag_ingress_handler(struct rmnet_frag_descriptor *frag_desc,
 			     struct rmnet_port *port)
 {
-	rmnet_perf_desc_hook_t rmnet_perf_ingress;
 	struct rmnet_map_header *qmap, __qmap;
 	struct rmnet_endpoint *ep;
 	struct rmnet_frag_descriptor *frag, *tmp;
@@ -1802,7 +1922,7 @@ __rmnet_frag_ingress_handler(struct rmnet_frag_descriptor *frag_desc,
 	/* Handle QMAPv5 packet */
 	if (qmap->next_hdr &&
 	    (port->data_format & (RMNET_FLAGS_INGRESS_COALESCE |
-				  RMNET_FLAGS_INGRESS_MAP_CKSUMV5))) {
+				  RMNET_PRIV_FLAGS_INGRESS_MAP_CKSUMV5))) {
 		if (rmnet_frag_process_next_hdr_packet(frag_desc, port, &segs,
 						       len))
 			goto recycle;
@@ -1818,22 +1938,17 @@ __rmnet_frag_ingress_handler(struct rmnet_frag_descriptor *frag_desc,
 	}
 
 	if (port->data_format & RMNET_INGRESS_FORMAT_PS)
-		qmi_rmnet_work_maybe_restart(port);
+		qmi_rmnet_work_maybe_restart(port,
+			list_first_entry_or_null(&segs,
+						 struct rmnet_frag_descriptor,
+						 list),
+			NULL);
 
 	if (skip_perf)
 		goto no_perf;
 
-	rcu_read_lock();
-	rmnet_perf_ingress = rcu_dereference(rmnet_perf_desc_entry);
-	if (rmnet_perf_ingress) {
-		list_for_each_entry_safe(frag, tmp, &segs, list) {
-			list_del_init(&frag->list);
-			rmnet_perf_ingress(frag, port);
-		}
-		rcu_read_unlock();
+	if (rmnet_module_hook_offload_ingress(&segs, port))
 		return;
-	}
-	rcu_read_unlock();
 
 no_perf:
 	list_for_each_entry_safe(frag, tmp, &segs, list) {
@@ -1845,10 +1960,6 @@ no_perf:
 recycle:
 	rmnet_recycle_frag_descriptor(frag_desc, port);
 }
-
-/* Notify perf at the end of SKB chain */
-rmnet_perf_chain_hook_t rmnet_perf_chain_end __rcu __read_mostly;
-EXPORT_SYMBOL(rmnet_perf_chain_end);
 
 void rmnet_descriptor_classify_chain_count(u64 chain_count,
 					   struct rmnet_port *port)
@@ -1888,10 +1999,10 @@ void rmnet_descriptor_classify_frag_count(u64 frag_count,
 void rmnet_frag_ingress_handler(struct sk_buff *skb,
 				struct rmnet_port *port)
 {
-	rmnet_perf_chain_hook_t rmnet_perf_opt_chain_end;
 	LIST_HEAD(desc_list);
 	bool skip_perf = (skb->priority == 0xda1a);
 	u64 chain_count = 0;
+	struct sk_buff *head = skb;
 
 	/* Deaggregation and freeing of HW originating
 	 * buffers is done within here
@@ -1914,8 +2025,14 @@ void rmnet_frag_ingress_handler(struct sk_buff *skb,
 			}
 		}
 
-		skb_frag = skb_shinfo(skb)->frag_list;
-		skb_shinfo(skb)->frag_list = NULL;
+		if (skb == head) {
+			skb_frag = skb_shinfo(skb)->frag_list;
+			skb_shinfo(skb)->frag_list = NULL;
+		} else {
+			skb_frag = skb->next;
+			skb->next = NULL;
+		}
+
 		consume_skb(skb);
 		skb = skb_frag;
 	}
@@ -1925,11 +2042,7 @@ void rmnet_frag_ingress_handler(struct sk_buff *skb,
 	if (skip_perf)
 		return;
 
-	rcu_read_lock();
-	rmnet_perf_opt_chain_end = rcu_dereference(rmnet_perf_chain_end);
-	if (rmnet_perf_opt_chain_end)
-		rmnet_perf_opt_chain_end();
-	rcu_read_unlock();
+	rmnet_module_hook_offload_chain_end();
 }
 
 void rmnet_descriptor_deinit(struct rmnet_port *port)
@@ -1938,13 +2051,15 @@ void rmnet_descriptor_deinit(struct rmnet_port *port)
 	struct rmnet_frag_descriptor *frag_desc, *tmp;
 
 	pool = port->frag_desc_pool;
+	if (pool) {
+		list_for_each_entry_safe(frag_desc, tmp, &pool->free_list, list) {
+			kfree(frag_desc);
+			pool->pool_size--;
+		}
 
-	list_for_each_entry_safe(frag_desc, tmp, &pool->free_list, list) {
-		kfree(frag_desc);
-		pool->pool_size--;
+		kfree(pool);
+		port->frag_desc_pool = NULL;
 	}
-
-	kfree(pool);
 }
 
 int rmnet_descriptor_init(struct rmnet_port *port)

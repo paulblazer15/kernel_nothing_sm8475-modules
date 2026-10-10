@@ -1,20 +1,22 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #include <linux/version.h>
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM rmnet
 #undef TRACE_INCLUDE_PATH
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,5,0)
-#ifdef CONFIG_ARCH_SDXNIGHTJAR
-#define TRACE_INCLUDE_PATH ../../../../../../../datarmnet/core
+
+#ifndef RMNET_TRACE_INCLUDE_PATH
+#if defined(CONFIG_RMNET_LA_PLATFORM) || defined(RMNET_LA_PLATFORM)
+#define RMNET_TRACE_INCLUDE_PATH ../../../../sm8475-modules/qcom/opensource/datarmnet/core
+#elif defined(__arch_um__)
+#define RMNET_TRACE_INCLUDE_PATH ../../datarmnet/core
 #else
-#define TRACE_INCLUDE_PATH ../../../../../../../src/datarmnet/core
-#endif /* endif LINUX_VERSION_CODE < KERNEL_VERSION(5,5,0) */
-#else
-#define TRACE_INCLUDE_PATH ../../../../sm8475-modules/qcom/opensource/datarmnet/core
-#endif
+#define RMNET_TRACE_INCLUDE_PATH ../../../../../../../datarmnet/core
+#endif /* CONFIG_RMNET_LA_PLATFORM || RMNET_LA_PLATFORM */
+#endif /* RMNET_TRACE_INCLUDE_PATH */
+#define TRACE_INCLUDE_PATH RMNET_TRACE_INCLUDE_PATH
 #define TRACE_INCLUDE_FILE rmnet_trace
 
 #if !defined(_TRACE_RMNET_H) || defined(TRACE_HEADER_MULTI_READ)
@@ -22,69 +24,10 @@
 
 #include <linux/skbuff.h>
 #include <linux/tracepoint.h>
-#include <linux/timekeeping.h>
+
 /*****************************************************************************/
 /* Trace events for rmnet module */
 /*****************************************************************************/
-DECLARE_EVENT_CLASS(rmnet_skb_time_template,
-
-	TP_PROTO(struct sk_buff *skb),
-
-	TP_ARGS(skb),
-
-	TP_STRUCT__entry(
-		__field(void *,	skbaddr)
-		__field(unsigned int, len)
-		__string(name,	skb->dev->name)
-		__field(u64,	qtime)
-
-	),
-
-	TP_fast_assign(
-		__entry->skbaddr = skb;
-		__entry->len = skb->len;
-		__assign_str(name, skb->dev->name);
-		__entry->qtime = ktime_get_raw_ns();
-	),
-
-	TP_printk("dev=%s skbaddr=%pK len=%u UTC time %ld",
-		  __get_str(name), __entry->skbaddr, __entry->len,
-		   __entry->qtime)
-);
-
-DEFINE_EVENT
-	(rmnet_skb_time_template, rmnet_skb_ip_route_entry,
-
-	TP_PROTO(struct sk_buff *skb),
-
-	TP_ARGS(skb)
-);
-
-DEFINE_EVENT
-	(rmnet_skb_time_template, rmnet_skb_ip_route_exit,
-
-	TP_PROTO(struct sk_buff *skb),
-
-	TP_ARGS(skb)
-);
-
-DEFINE_EVENT
-	(rmnet_skb_time_template, rmnet_skb_egress_entry,
-
-	TP_PROTO(struct sk_buff *skb),
-
-	TP_ARGS(skb)
-);
-
-DEFINE_EVENT
-	(rmnet_skb_time_template, rmnet_skb_egress_exit,
-
-	TP_PROTO(struct sk_buff *skb),
-
-	TP_ARGS(skb)
-);
-
-
 TRACE_EVENT(rmnet_xmit_skb,
 
 	TP_PROTO(struct sk_buff *skb),
@@ -324,9 +267,9 @@ DEFINE_EVENT
 DECLARE_EVENT_CLASS(print_udp,
 
 	TP_PROTO(struct sk_buff *skb, const char *saddr, const char *daddr,
-		 struct udphdr *uh),
+		 struct udphdr *uh, u16 ip_id),
 
-	TP_ARGS(skb, saddr, daddr, uh),
+	TP_ARGS(skb, saddr, daddr, uh, ip_id),
 
 	TP_STRUCT__entry(
 		__field(void *, skbaddr)
@@ -335,6 +278,7 @@ DECLARE_EVENT_CLASS(print_udp,
 		__string(daddr, daddr)
 		__field(__be16, source)
 		__field(__be16, dest)
+		__field(__be16, ip_id)
 	),
 
 	TP_fast_assign(
@@ -344,30 +288,60 @@ DECLARE_EVENT_CLASS(print_udp,
 		__assign_str(daddr, daddr);
 		__entry->source = uh->source;
 		__entry->dest = uh->dest;
+		__entry->ip_id = ip_id;
 	),
 
-	TP_printk("UDP: skbaddr=%pK, len=%d source=%s %u dest=%s %u",
+	TP_printk("UDP: skbaddr=%pK, len=%d source=%s %u dest=%s %u ip_id=%u",
 		__entry->skbaddr, __entry->len,
 		__get_str(saddr), be16_to_cpu(__entry->source),
-		__get_str(daddr), be16_to_cpu(__entry->dest))
+		__get_str(daddr), be16_to_cpu(__entry->dest),
+		__entry->ip_id)
 );
 
 DEFINE_EVENT
 	(print_udp, print_udp_tx,
 
 	TP_PROTO(struct sk_buff *skb, const char *saddr, const char *daddr,
-		 struct udphdr *uh),
+		 struct udphdr *uh, u16 ip_id),
 
-	TP_ARGS(skb, saddr, daddr, uh)
+	TP_ARGS(skb, saddr, daddr, uh, ip_id)
 );
 
 DEFINE_EVENT
 	(print_udp, print_udp_rx,
 
 	TP_PROTO(struct sk_buff *skb, const char *saddr, const char *daddr,
-		 struct udphdr *uh),
+		 struct udphdr *uh, u16 ip_id),
 
-	TP_ARGS(skb, saddr, daddr, uh)
+	TP_ARGS(skb, saddr, daddr, uh, ip_id)
+);
+
+TRACE_EVENT(print_pfn,
+
+	TP_PROTO(struct sk_buff *skb, unsigned long *pfn_list, int num_elements),
+
+	TP_ARGS(skb, pfn_list, num_elements),
+
+	TP_STRUCT__entry(
+		__field(void *, skbaddr)
+		__field(int, num_elements)
+		__dynamic_array(unsigned long, pfn_list, num_elements)
+	),
+
+	TP_fast_assign(
+		__entry->skbaddr = skb;
+		__entry->num_elements = num_elements;
+		memcpy(__get_dynamic_array(pfn_list), pfn_list,
+		       num_elements * sizeof(*pfn_list));
+	),
+
+	TP_printk("skbaddr=%pK count=%d pfn=%s",
+		  __entry->skbaddr,
+		  __entry->num_elements,
+		  __print_array(__get_dynamic_array(pfn_list),
+				__entry->num_elements,
+				sizeof(unsigned long))
+	)
 );
 
 /*****************************************************************************/
