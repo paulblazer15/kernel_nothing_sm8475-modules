@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -587,6 +587,13 @@ void hdd_enable_ns_offload(struct hdd_adapter *adapter,
 		goto put_vdev;
 	}
 
+	ucfg_pmo_set_ns_offload_enable_dynamic(vdev, trigger, true);
+
+	if (!ucfg_pmo_get_ns_offload_enable_dynamic(vdev)) {
+		hdd_debug("NS offload is dynamically disabled");
+		goto put_vdev;
+	}
+
 	if (ucfg_pmo_get_arp_ns_offload_dynamic_disable(vdev)) {
 		hdd_debug("Dynamic arp ns offload disabled");
 		ucfg_pmo_flush_ns_offload_req(vdev);
@@ -666,6 +673,12 @@ void hdd_disable_ns_offload(struct hdd_adapter *adapter,
 		goto put_vdev;
 	}
 
+	if (!ucfg_pmo_get_ns_offload_enable_dynamic(vdev)) {
+		hdd_debug("NS offload is already dynamically disabled");
+		goto put_vdev;
+	}
+
+	ucfg_pmo_set_ns_offload_enable_dynamic(vdev, trigger, false);
 	status = ucfg_pmo_disable_ns_offload_in_fwr(vdev, trigger);
 	if (status != QDF_STATUS_SUCCESS)
 		hdd_err("Failed to disable NS Offload");
@@ -3038,10 +3051,18 @@ static int __wlan_hdd_cfg80211_set_txpower(struct wiphy *wiphy,
 	return 0;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0))
+int wlan_hdd_cfg80211_set_txpower(struct wiphy *wiphy,
+				  struct wireless_dev *wdev,
+				  int radio_idx,
+				  enum nl80211_tx_power_setting type,
+				  int mbm)
+#else
 int wlan_hdd_cfg80211_set_txpower(struct wiphy *wiphy,
 				  struct wireless_dev *wdev,
 				  enum nl80211_tx_power_setting type,
 				  int mbm)
+#endif
 {
 	struct osif_psoc_sync *psoc_sync;
 	int errno;
@@ -3259,9 +3280,22 @@ static int __wlan_hdd_cfg80211_get_txpower(struct wiphy *wiphy,
 	return 0;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0))
 int wlan_hdd_cfg80211_get_txpower(struct wiphy *wiphy,
-					 struct wireless_dev *wdev,
-					 int *dbm)
+				  struct wireless_dev *wdev,
+				  int radio_idx,
+				  unsigned int link_id,
+				  int *dbm)
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0))
+int wlan_hdd_cfg80211_get_txpower(struct wiphy *wiphy,
+				  struct wireless_dev *wdev,
+				  unsigned int link_id,
+				  int *dbm)
+#else
+int wlan_hdd_cfg80211_get_txpower(struct wiphy *wiphy,
+				  struct wireless_dev *wdev,
+				  int *dbm)
+#endif
 {
 	struct osif_psoc_sync *psoc_sync;
 	int errno;

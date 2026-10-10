@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023-2025 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -920,6 +920,10 @@
 
 #ifdef CONFIG_WLAN_SYSFS_RF_TEST_MODE
 #define FEATURE_SYSFS_RF_TEST_MODE (1)
+#endif
+
+#ifdef CONFIG_WLAN_SYSFS_BITRATES
+#define WLAN_SYSFS_BITRATES (1)
 #endif
 
 #ifdef CONFIG_RX_PERFORMANCE
@@ -2601,6 +2605,10 @@
 #define HIF_CPU_PERF_AFFINE_MASK (1)
 #endif
 
+#ifdef CONFIG_RECORD_DP_CE_EVTS
+#define RECORD_DP_CE_EVTS
+#endif
+
 #ifdef CONFIG_HIF_CPU_CLEAR_AFFINITY
 #define HIF_CPU_CLEAR_AFFINITY (1)
 #endif
@@ -2907,4 +2915,11 @@
 #define FEATURE_BLACKLIST_MGR (1)
 #endif
 
+#ifdef CONFIG_FEATURE_ENABLE_CE_DP_IRQ_AFFINE
+#define FEATURE_ENABLE_CE_DP_IRQ_AFFINE (1)
+#endif
+
+#ifdef CONFIG_WLAN_BOOST_CPU_FREQ_IN_ROAM
+#define WLAN_BOOST_CPU_FREQ_IN_ROAM (1)
+#endif
 #endif /* CONFIG_TO_FEATURE_H */

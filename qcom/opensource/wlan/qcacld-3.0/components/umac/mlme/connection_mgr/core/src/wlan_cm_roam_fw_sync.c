@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -46,6 +46,7 @@
 #include "connection_mgr/core/src/wlan_cm_sm.h"
 #include <wlan_mlo_mgr_sta.h>
 #include "wlan_mlo_mgr_roam.h"
+#include "target_if.h"
 
 QDF_STATUS cm_fw_roam_sync_req(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
 			       void *event, uint32_t event_data_len)
@@ -1080,6 +1081,7 @@ QDF_STATUS cm_fw_roam_invoke_fail(struct wlan_objmgr_psoc *psoc,
 	struct wlan_objmgr_vdev *vdev;
 	wlan_cm_id cm_id = CM_ID_INVALID;
 	struct cnx_mgr *cm_ctx;
+	struct cm_roam_req *roam_req = NULL;
 
 	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(psoc,
 						    vdev_id,
@@ -1095,6 +1097,10 @@ QDF_STATUS cm_fw_roam_invoke_fail(struct wlan_objmgr_psoc *psoc,
 		status = QDF_STATUS_E_NULL_VALUE;
 		goto error;
 	}
+
+	roam_req = cm_get_first_roam_command(vdev);
+	if (roam_req)
+		cm_id = roam_req->cm_id;
 
 	status = cm_sm_deliver_event(vdev, WLAN_CM_SM_EV_ROAM_INVOKE_FAIL,
 				     sizeof(wlan_cm_id), &cm_id);
@@ -1274,4 +1280,26 @@ QDF_STATUS wlan_cm_free_roam_synch_frame_ind(struct rso_config *rso_cfg)
 	}
 
 	return QDF_STATUS_SUCCESS;
+}
+
+void cm_update_ext_cap_ie_at_source(struct wlan_objmgr_psoc *psoc,
+				    struct element_info *assoc_ie)
+{
+	struct wmi_unified *wmi_handle = get_wmi_unified_hdl_from_psoc(psoc);
+	const uint8_t *ext_cap_ie;
+	struct s_ext_cap *extcap;
+
+	if (!wmi_handle)
+		return;
+
+	if (!wmi_service_enabled(wmi_handle, wmi_service_infra_mbssid))
+		return;
+
+	ext_cap_ie  = wlan_get_ie_ptr_from_eid(WLAN_ELEMID_XCAPS,
+					       assoc_ie->ptr, assoc_ie->len);
+	if (!ext_cap_ie)
+		return;
+
+	extcap = (struct s_ext_cap *)&ext_cap_ie[2];
+	extcap->multi_bssid = 1;
 }
