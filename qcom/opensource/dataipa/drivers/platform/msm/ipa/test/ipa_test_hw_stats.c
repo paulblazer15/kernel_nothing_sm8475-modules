@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include "ipa_ut_framework.h"
@@ -209,9 +210,9 @@ static int ipa_test_hw_stats_add_FnR(void *priv)
 	rt_rule->commit = 1;
 	rt_rule->ip = IPA_IP_v4;
 	rt_lookup.ip = rt_rule->ip;
-	strlcpy(rt_rule->rt_tbl_name, "V4_RT_TO_USB_CONS",
+	strscpy(rt_rule->rt_tbl_name, "V4_RT_TO_USB_CONS",
 		IPA_RESOURCE_NAME_MAX);
-	strlcpy(rt_lookup.name, rt_rule->rt_tbl_name, IPA_RESOURCE_NAME_MAX);
+	strscpy(rt_lookup.name, rt_rule->rt_tbl_name, IPA_RESOURCE_NAME_MAX);
 	rt_rule->num_rules = 1;
 	((struct ipa_rt_rule_add_v2 *)
 	rt_rule->rules)[0].rule.dst = IPA_CLIENT_USB_CONS;
@@ -243,9 +244,9 @@ static int ipa_test_hw_stats_add_FnR(void *priv)
 	rt_rule->commit = 1;
 	rt_rule->ip = IPA_IP_v6;
 	rt_lookup.ip = rt_rule->ip;
-	strlcpy(rt_rule->rt_tbl_name, "V6_RT_TO_USB_CONS",
+	strscpy(rt_rule->rt_tbl_name, "V6_RT_TO_USB_CONS",
 		IPA_RESOURCE_NAME_MAX);
-	strlcpy(rt_lookup.name, rt_rule->rt_tbl_name, IPA_RESOURCE_NAME_MAX);
+	strscpy(rt_lookup.name, rt_rule->rt_tbl_name, IPA_RESOURCE_NAME_MAX);
 	rt_rule->num_rules = 1;
 	((struct ipa_rt_rule_add_v2 *)
 	rt_rule->rules)[0].rule.dst = IPA_CLIENT_USB_CONS;
@@ -277,9 +278,9 @@ static int ipa_test_hw_stats_add_FnR(void *priv)
 	rt_rule->commit = 1;
 	rt_rule->ip = IPA_IP_v4;
 	rt_lookup.ip = rt_rule->ip;
-	strlcpy(rt_rule->rt_tbl_name, "V4_RT_TO_ODU_CONS",
+	strscpy(rt_rule->rt_tbl_name, "V4_RT_TO_ODU_CONS",
 		IPA_RESOURCE_NAME_MAX);
-	strlcpy(rt_lookup.name, rt_rule->rt_tbl_name, IPA_RESOURCE_NAME_MAX);
+	strscpy(rt_lookup.name, rt_rule->rt_tbl_name, IPA_RESOURCE_NAME_MAX);
 	rt_rule->num_rules = 1;
 	((struct ipa_rt_rule_add_v2 *)
 	rt_rule->rules)[0].rule.dst = IPA_CLIENT_ODU_EMB_CONS;
@@ -311,9 +312,9 @@ static int ipa_test_hw_stats_add_FnR(void *priv)
 	rt_rule->commit = 1;
 	rt_rule->ip = IPA_IP_v6;
 	rt_lookup.ip = rt_rule->ip;
-	strlcpy(rt_rule->rt_tbl_name, "V6_RT_TO_ODU_CONS",
+	strscpy(rt_rule->rt_tbl_name, "V6_RT_TO_ODU_CONS",
 		IPA_RESOURCE_NAME_MAX);
-	strlcpy(rt_lookup.name, rt_rule->rt_tbl_name, IPA_RESOURCE_NAME_MAX);
+	strscpy(rt_lookup.name, rt_rule->rt_tbl_name, IPA_RESOURCE_NAME_MAX);
 	rt_rule->num_rules = 1;
 	((struct ipa_rt_rule_add_v2 *)
 	rt_rule->rules)[0].rule.dst = IPA_CLIENT_ODU_EMB_CONS;
@@ -745,7 +746,7 @@ static int ipa_test_hw_stats_query_drop_stats(void *priv)
                goto fail;
 
        for (i = 0; i <= IPA_CLIENT_MAX; i++) {
-               ep_idx = ipa3_get_ep_mapping(i);
+               ep_idx = ipa_get_ep_mapping(i);
                if (ep_idx == -1 || !IPA_CLIENT_IS_CONS(i) || IPA_CLIENT_IS_TEST(i))
                        continue;
 
@@ -754,7 +755,7 @@ static int ipa_test_hw_stats_query_drop_stats(void *priv)
                        ipahal_get_ep_bit(ep_idx)))
                        continue;
 
-               IPA_UT_INFO("Client %u pkt_cnt %u bytes cnt %llu\n", i,
+               IPA_UT_INFO("Client %u pkt_cnt %u bytes cnt %u\n", i,
                        query->client[i].drop_packet_cnt, query->client[i].drop_byte_cnt);
        }
 
@@ -798,7 +799,7 @@ static int ipa_test_hw_stats_query_teth_stats(void *priv)
        }
 
        for (i = 0; i < IPA_CLIENT_MAX; i++) {
-               int ep_idx = ipa3_get_ep_mapping(i);
+               int ep_idx = ipa_get_ep_mapping(i);
 
                if (ep_idx == -1)
                        continue;
@@ -821,7 +822,7 @@ static int ipa_test_hw_stats_query_teth_stats(void *priv)
                }
 
                for (j = 0; j < IPA_CLIENT_MAX; j++) {
-                       int cons_idx = ipa3_get_ep_mapping(j);
+                       int cons_idx = ipa_get_ep_mapping(j);
 
                        if (cons_idx == -1)
                                continue;
@@ -898,7 +899,7 @@ static int ipa_test_hw_stats_query_quota_stats(void *priv)
        }
 
        for (i = 0; i < IPA_CLIENT_MAX; i++) {
-               ep_idx = ipa3_get_ep_mapping(i);
+               ep_idx = ipa_get_ep_mapping(i);
 
                if (ep_idx == -1)
                        continue;
@@ -1023,9 +1024,9 @@ static int ipa_test_hw_stats_set_bw(void *priv)
 	info->threshold[1] = 400;
 	info->threshold[2] = 600;
 
-	ret = ipa3_uc_bw_monitor(info);
+	ret = ipa_uc_bw_monitor(info);
 	if (ret < 0) {
-		IPA_UT_ERR("ipa3_uc_bw_monitor fails\n");
+		IPA_UT_ERR("ipa_uc_bw_monitor fails\n");
 		ret = -ENOMEM;
 	}
 

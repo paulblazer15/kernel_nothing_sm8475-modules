@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, 2024-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/of.h>
@@ -61,6 +61,9 @@
 /* FOR_SEQ_HIGH channel scratch: (((8 * (pipe_id * ctx_size + offset_lines)) + 4) / 4) */
 #define GSI_GSI_SHRAM_n_EP_FOR_SEQ_HIGH_N_GET(ep_id) (((8 * (ep_id * 10 + 9)) + 4) / 4)
 
+#define IPA_GSI_OFFSET_WORDS_SCRATCH_FOR_SEQ_HIGH_5_5 19
+#define IPA_NUM_BYTES_PER_CHNL_SHRAM_5_5 20
+
 #ifndef CONFIG_DEBUG_FS
 void gsi_debugfs_init(void)
 {
@@ -80,6 +83,8 @@ static bool running_emulation;
 #endif
 
 struct gsi_ctx *gsi_ctx;
+EXPORT_SYMBOL_GPL(gsi_ctx);
+
 
 static union __packed gsi_channel_scratch __gsi_update_mhi_channel_scratch(
 	unsigned long chan_hdl, struct __packed gsi_mhi_channel_scratch mscr);
@@ -315,7 +320,7 @@ static void gsi_channel_state_change_wait(unsigned long chan_hdl,
 
 		GSIDBG("GSI wait on chan_hld=%lu irqtyp=%u state=%u intr=%u\n",
 			chan_hdl,
-			type,
+			type.ch_ctrl,
 			ctx->state,
 			gsi_pending_intr);
 	}
@@ -1246,6 +1251,7 @@ static uint32_t gsi_get_max_event_rings(enum gsi_ver ver)
 		break;
 	case GSI_VER_3_0:
 	case GSI_VER_5_2:
+	case GSI_VER_5_5:
 		gsihal_read_reg_n_fields(GSI_EE_n_GSI_HW_PARAM_4,
 			gsi_ctx->per.ee, &hw_param4);
 		max_ev = hw_param4.gsi_num_ev_per_ee;
@@ -1319,8 +1325,6 @@ EXPORT_SYMBOL(gsi_map_base);
 
 int gsi_unmap_base(void)
 {
-	gsihal_destroy();
-
 	if (!gsi_ctx) {
 		pr_err("%s:%d gsi context not allocated\n", __func__, __LINE__);
 		return -GSI_STATUS_NODEV;
@@ -1346,7 +1350,11 @@ static void __gsi_msi_write_msg(struct msi_desc *desc, struct msi_msg *msg)
 	if (IS_ERR_OR_NULL(desc) || IS_ERR_OR_NULL(msg) || IS_ERR_OR_NULL(gsi_ctx))
 		BUG();
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 18, 0))
+	msi = desc->msi_index;
+#else
 	msi = desc->platform.msi_index;
+#endif
 
 	/* MSI should be valid and unallocated */
 	if ((msi >= gsi_ctx->msi.num) || (test_bit(msi, gsi_ctx->msi.allocated)))
@@ -1367,7 +1375,7 @@ static void __gsi_msi_write_msg(struct msi_desc *desc, struct msi_msg *msg)
 		gsi_ctx->msi_addr_set = true;
 	}
 
-	GSIDBG("saved msi %u msg data %u addr 0x%08x%08x, MSI:0x%lx\n", msi,
+	GSIDBG("saved msi %u msg data %u addr 0x%08x%08x, MSI:0x%llx\n", msi,
 		msg->data, msg->address_hi, msg->address_lo, gsi_ctx->msi_addr);
 }
 
@@ -1401,15 +1409,21 @@ static int __gsi_request_msi_irq(unsigned long msi)
 
 static int __gsi_allocate_msis(void)
 {
-#ifdef CONFIG_GENERIC_MSI_IRQ_DOMAIN
 	int result = 0;
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0))
 	struct msi_desc *desc = NULL;
+#endif
 	size_t size = 0;
 
 	/* Allocate all MSIs */
-	GSIDBG("gsi_ctx->dev = %lu, gsi_ctx->msi.num = %d", gsi_ctx->dev, gsi_ctx->msi.num);
+	GSIDBG("gsi_ctx->dev = %p, gsi_ctx->msi.num = %d", gsi_ctx->dev, gsi_ctx->msi.num);
+#if (KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE)
 	result = platform_msi_domain_alloc_irqs(gsi_ctx->dev, gsi_ctx->msi.num,
 			__gsi_msi_write_msg);
+#else
+	result = platform_device_msi_init_and_alloc_irqs(gsi_ctx->dev, gsi_ctx->msi.num,
+			__gsi_msi_write_msg);
+#endif
 	if (result) {
 		GSIERR("error allocating platform MSIs - %d\n", result);
 		return -GSI_STATUS_ERROR;
@@ -1419,6 +1433,11 @@ static int __gsi_allocate_msis(void)
 	/* Loop through the allocated MSIs and save the info, then
 	 * request the IRQ.
 	 */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 18, 0))
+	for (unsigned long msi = 0; msi < gsi_ctx->msi.num; msi++) {
+		/* Save IRQ */
+		gsi_ctx->msi.irq[msi] = msi_get_virq(gsi_ctx->dev, msi);
+#else
 	for_each_msi_entry(desc, gsi_ctx->dev) {
 		unsigned long msi = desc->platform.msi_index;
 
@@ -1432,7 +1451,7 @@ static int __gsi_allocate_msis(void)
 		/* Save IRQ */
 		gsi_ctx->msi.irq[msi] = desc->irq;
 		GSIDBG("desc->irq =%d\n", desc->irq);
-
+#endif
 		/* Request the IRQ */
 		if (__gsi_request_msi_irq(msi)) {
 			GSIERR("error requesting IRQ for MSI %lu\n",
@@ -1447,13 +1466,14 @@ static int __gsi_allocate_msis(void)
 
 err_free_msis:
 	size = sizeof(unsigned long) * BITS_TO_LONGS(gsi_ctx->msi.num);
+#if (KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE)
 	platform_msi_domain_free_irqs(gsi_ctx->dev);
+#else
+	platform_device_msi_free_irqs_all(gsi_ctx->dev);
+#endif
 	memset(gsi_ctx->msi.allocated, 0, size);
 
 	return result;
-#else
-	return GSI_STATUS_SUCCESS;
-#endif
 }
 
 int gsi_register_device(struct gsi_per_props *props, unsigned long *dev_hdl)
@@ -1492,6 +1512,9 @@ int gsi_register_device(struct gsi_per_props *props, unsigned long *dev_hdl)
 		GSIERR("per already registered\n");
 		return -GSI_STATUS_UNSUPPORTED_OP;
 	}
+
+	gsihal_destroy();
+	gsi_unmap_base();
 
 	spin_lock_init(&gsi_ctx->slock);
 	gsi_ctx->per = *props;
@@ -1663,7 +1686,7 @@ int gsi_register_device(struct gsi_per_props *props, unsigned long *dev_hdl)
 		goto err_iounmap;
 	}
 
-	gsi_ctx->evt_bmap = ~((1 << gsi_ctx->max_ev) - 1);
+	gsi_ctx->evt_bmap = ~((((unsigned long)1) << gsi_ctx->max_ev) - 1);
 
 	/* exclude reserved mhi events */
 	if (props->mhi_er_id_limits_valid)
@@ -1749,8 +1772,10 @@ err_free_msis:
 	if (gsi_ctx->msi.num) {
 		size_t size =
 			sizeof(unsigned long) * BITS_TO_LONGS(gsi_ctx->msi.num);
-#ifdef CONFIG_GENERIC_MSI_IRQ_DOMAIN
+#if (KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE)
 		platform_msi_domain_free_irqs(gsi_ctx->dev);
+#else
+		platform_device_msi_free_irqs_all(gsi_ctx->dev);
 #endif
 		memset(gsi_ctx->msi.allocated, 0, size);
 	}
@@ -1858,13 +1883,14 @@ int gsi_deregister_device(unsigned long dev_hdl, bool force)
 	__gsi_config_glob_irq(gsi_ctx->per.ee, ~0, 0);
 	__gsi_config_gen_irq(gsi_ctx->per.ee, ~0, 0);
 
-#ifdef CONFIG_GENERIC_MSI_IRQ_DOMAIN
 	if (gsi_ctx->msi.num)
+#if (KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE)
 		platform_msi_domain_free_irqs(gsi_ctx->dev);
+#else
+		platform_device_msi_free_irqs_all(gsi_ctx->dev);
 #endif
 
 	devm_free_irq(gsi_ctx->dev, gsi_ctx->per.irq, gsi_ctx);
-	gsi_unmap_base();
 	gsi_ctx->per_registered = false;
 	return GSI_STATUS_SUCCESS;
 }
@@ -1879,8 +1905,8 @@ static void gsi_program_evt_ring_ctx(struct gsi_evt_ring_props *props,
 	struct gsihal_reg_ev_ch_k_cntxt_3 ev_ch_k_cntxt_3;
 	struct gsihal_reg_ev_ch_k_cntxt_8 ev_ch_k_cntxt_8;
 	struct gsihal_reg_ev_ch_k_cntxt_9 ev_ch_k_cntxt_9;
-	struct gsihal_reg_ev_ch_k_cntxt_10 ev_ch_k_cntxt_10;
-	struct gsihal_reg_ev_ch_k_cntxt_11 ev_ch_k_cntxt_11;
+	union gsihal_reg_ev_ch_k_cntxt_10 ev_ch_k_cntxt_10;
+	union gsihal_reg_ev_ch_k_cntxt_11 ev_ch_k_cntxt_11;
 	struct gsihal_reg_ev_ch_k_cntxt_12 ev_ch_k_cntxt_12;
 	struct gsihal_reg_ev_ch_k_cntxt_13 ev_ch_k_cntxt_13;
 
@@ -1918,25 +1944,41 @@ static void gsi_program_evt_ring_ctx(struct gsi_evt_ring_props *props,
 		ee, evt_id,
 		&ev_ch_k_cntxt_9);
 
-	ev_ch_k_cntxt_10.msi_addr_lsb = GSI_LSB(props->msi_addr);
-	gsihal_write_reg_nk_fields(GSI_EE_n_EV_CH_k_CNTXT_10,
-		ee, evt_id,
-		&ev_ch_k_cntxt_10);
+	if(props->intf != GSI_EVT_CHTYPE_WDI3_V2_EV) {
+		ev_ch_k_cntxt_10.msi_addr_lsb = GSI_LSB(props->msi_addr);
+		gsihal_write_reg_nk_fields(GSI_EE_n_EV_CH_k_CNTXT_10,
+			ee, evt_id,
+			&ev_ch_k_cntxt_10);
 
-	ev_ch_k_cntxt_11.msi_addr_msb = GSI_MSB(props->msi_addr);
-	gsihal_write_reg_nk_fields(GSI_EE_n_EV_CH_k_CNTXT_11,
-		ee, evt_id,
-		&ev_ch_k_cntxt_11);
+		ev_ch_k_cntxt_11.msi_addr_msb = GSI_MSB(props->msi_addr);
+		gsihal_write_reg_nk_fields(GSI_EE_n_EV_CH_k_CNTXT_11,
+			ee, evt_id,
+			&ev_ch_k_cntxt_11);
 
-	ev_ch_k_cntxt_12.rp_update_addr_lsb = GSI_LSB(props->rp_update_addr);
-	gsihal_write_reg_nk_fields(GSI_EE_n_EV_CH_k_CNTXT_12,
-		ee, evt_id,
-		&ev_ch_k_cntxt_12);
 
-	ev_ch_k_cntxt_13.rp_update_addr_msb = GSI_MSB(props->rp_update_addr);
-	gsihal_write_reg_nk_fields(GSI_EE_n_EV_CH_k_CNTXT_13,
-		ee, evt_id,
-		&ev_ch_k_cntxt_13);
+		ev_ch_k_cntxt_12.rp_update_addr_lsb = GSI_LSB(props->rp_update_addr);
+		gsihal_write_reg_nk_fields(GSI_EE_n_EV_CH_k_CNTXT_12,
+			ee, evt_id,
+			&ev_ch_k_cntxt_12);
+
+		ev_ch_k_cntxt_13.rp_update_addr_msb = GSI_MSB(props->rp_update_addr);
+		gsihal_write_reg_nk_fields(GSI_EE_n_EV_CH_k_CNTXT_13,
+			ee, evt_id,
+			&ev_ch_k_cntxt_13);
+	}
+	else {
+		ev_ch_k_cntxt_10.rp_addr_lsb = GSI_LSB(props->rp_update_addr);
+		gsihal_write_reg_nk_fields(GSI_EE_n_EV_CH_k_CNTXT_10,
+			ee, evt_id,
+			&ev_ch_k_cntxt_10);
+
+		ev_ch_k_cntxt_11.rp_addr_msb = GSI_MSB(props->rp_update_addr);
+		gsihal_write_reg_nk_fields(GSI_EE_n_EV_CH_k_CNTXT_11,
+			ee, evt_id,
+			&ev_ch_k_cntxt_11);
+	}
+
+
 }
 
 static void gsi_init_evt_ring(struct gsi_evt_ring_props *props,
@@ -2089,8 +2131,10 @@ static int gsi_cleanup_xfer_user_data(unsigned long chan_hdl,
 			rp_idx = gsi_find_idx_from_addr(&ctx->ring,
 				ctx->ring.rp_local);
 			WARN_ON(!ctx->user_data[rp_idx].valid);
-			cleanup_cb(ctx->props.chan_user_data,
-				ctx->user_data[rp_idx].p);
+			if (ctx->user_data[rp_idx].valid) {
+				cleanup_cb(ctx->props.chan_user_data,
+					ctx->user_data[rp_idx].p);
+			}
 			gsi_incr_ring_rp(&ctx->ring);
 		}
 	}
@@ -2166,7 +2210,7 @@ static int __gsi_pair_msi(struct gsi_evt_ctx *ctx,
 	props->msi_addr = (uint64_t)gsi_ctx->msi.msg[msi].address_hi << 32 |
 			(uint64_t)gsi_ctx->msi.msg[msi].address_lo;
 
-	GSIDBG("props->intvec = %d, props->msi_addr = %lu\n", props->intvec, props->msi_addr);
+	GSIDBG("props->intvec = %d, props->msi_addr = %llu\n", props->intvec, props->msi_addr);
 
 	if (props->msi_addr == 0)
 		BUG();
@@ -2735,15 +2779,14 @@ static void gsi_program_chan_ctx(struct gsi_chan_props *props, unsigned int ee,
 	case GSI_CHAN_PROT_WDI3:
 	case GSI_CHAN_PROT_GCI:
 	case GSI_CHAN_PROT_MHIP:
+	case GSI_CHAN_PROT_WDI3_V2:
 		ch_k_cntxt_0.chtype_protocol_msb = 0;
 		break;
 	case GSI_CHAN_PROT_AQC:
 	case GSI_CHAN_PROT_11AD:
-	case GSI_CHAN_PROT_MHIC:
 	case GSI_CHAN_PROT_RTK:
 	case GSI_CHAN_PROT_QDSS:
 	case GSI_CHAN_PROT_NTN:
-	case GSI_CHAN_PROT_WDI3M:
 		ch_k_cntxt_0.chtype_protocol_msb = 1;
 		break;
 	default:
@@ -2915,9 +2958,10 @@ int gsi_alloc_channel(struct gsi_chan_props *props, unsigned long dev_hdl,
 	}
 	memset(ctx, 0, sizeof(*ctx));
 
-	/* For IPA offloaded WDI/RTK/XDCI channels not required user_data pointer */
-	if (props->prot == GSI_CHAN_PROT_GPI ||
-		props->prot == GSI_CHAN_PROT_GCI)
+	/* For IPA offloaded WDI channels not required user_data pointer */
+	if (props->prot != GSI_CHAN_PROT_WDI2 &&
+		props->prot != GSI_CHAN_PROT_WDI3 &&
+		props->prot != GSI_CHAN_PROT_WDI3_V2)
 		user_data_size = props->ring_len / props->re_size;
 	else
 		user_data_size = props->re_size;
@@ -2992,7 +3036,8 @@ int gsi_alloc_channel(struct gsi_chan_props *props, unsigned long dev_hdl,
 			atomic_inc(&ctx->evtr->chan_ref_cnt);
 			if (ctx->evtr->props.exclusive) {
 				if (atomic_read(&ctx->evtr->chan_ref_cnt) == 1)
-					ctx->evtr->chan[ctx->evtr->num_of_chan_allocated++] = ctx;
+					ctx->evtr->chan
+					[ctx->evtr->num_of_chan_allocated++] = ctx;
 			}
 			else {
 				ctx->evtr->chan[ctx->evtr->num_of_chan_allocated++]
@@ -3016,8 +3061,6 @@ int gsi_alloc_channel(struct gsi_chan_props *props, unsigned long dev_hdl,
 	if (props->prot == GSI_CHAN_PROT_GCI) {
 		gsi_ctx->coal_info.ch_id = props->ch_id;
 		gsi_ctx->coal_info.evchid = props->evt_ring_hdl;
-		GSIDBG("GSI coal ch = %d, ev id %d\n",
-			props->ch_id, props->evt_ring_hdl);
 	}
 
 	return GSI_STATUS_SUCCESS;
@@ -3152,6 +3195,22 @@ int gsi_write_channel_scratch2_reg(unsigned long chan_hdl,
 	return GSI_STATUS_SUCCESS;
 }
 EXPORT_SYMBOL(gsi_write_channel_scratch2_reg);
+
+/**
+ * gsi_status_enabled() - Query GSI Status
+ *
+ * Returns:	true if ENABLED, false on DISABLED
+ *
+ */
+bool gsi_status_enabled(void)
+{
+	struct gsihal_reg_gsi_status gsi_status;
+
+	gsihal_read_reg_n_fields(GSI_EE_n_GSI_STATUS,
+		gsi_ctx->per.ee, &gsi_status);
+	return gsi_status.enabled;
+}
+EXPORT_SYMBOL_GPL(gsi_status_enabled);
 
 static void __gsi_read_channel_scratch(unsigned long chan_hdl,
 		union __packed gsi_channel_scratch * val)
@@ -3404,6 +3463,11 @@ int gsi_start_channel(unsigned long chan_hdl)
 
 	ctx = &gsi_ctx->chan[chan_hdl];
 
+	if (ctx->state == GSI_CHAN_STATE_STARTED) {
+		GSIDBG("chan_hdl=%lu already in started state\n", chan_hdl);
+		return GSI_STATUS_SUCCESS;
+	}
+
 	if (ctx->state != GSI_CHAN_STATE_ALLOCATED &&
 		ctx->state != GSI_CHAN_STATE_STOP_IN_PROC &&
 		ctx->state != GSI_CHAN_STATE_STOPPED) {
@@ -3467,79 +3531,79 @@ void gsi_dump_ch_info(unsigned long chan_hdl)
 	}
 
 	if (chan_hdl >= gsi_ctx->max_ch) {
-		GSIDBG("invalid chan id %u\n", chan_hdl);
+		GSIDBG("invalid chan id %lu\n", chan_hdl);
 		return;
 	}
 
 	val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_CNTXT_0,
 		gsi_ctx->per.ee, chan_hdl);
-	GSIERR("CH%2d CTX0  0x%x\n", chan_hdl, val);
+	GSIERR("CH%2lu CTX0  0x%x\n", chan_hdl, val);
 	val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_CNTXT_1,
 		gsi_ctx->per.ee, chan_hdl);
-	GSIERR("CH%2d CTX1  0x%x\n", chan_hdl, val);
+	GSIERR("CH%2lu CTX1  0x%x\n", chan_hdl, val);
 	val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_CNTXT_2,
 		gsi_ctx->per.ee, chan_hdl);
-	GSIERR("CH%2d CTX2  0x%x\n", chan_hdl, val);
+	GSIERR("CH%2lu CTX2  0x%x\n", chan_hdl, val);
 	val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_CNTXT_3,
 		gsi_ctx->per.ee, chan_hdl);
-	GSIERR("CH%2d CTX3  0x%x\n", chan_hdl, val);
+	GSIERR("CH%2lu CTX3  0x%x\n", chan_hdl, val);
 	val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_CNTXT_4,
 		gsi_ctx->per.ee, chan_hdl);
-	GSIERR("CH%2d CTX4  0x%x\n", chan_hdl, val);
+	GSIERR("CH%2lu CTX4  0x%x\n", chan_hdl, val);
 	val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_CNTXT_5,
 		gsi_ctx->per.ee, chan_hdl);
-	GSIERR("CH%2d CTX5  0x%x\n", chan_hdl, val);
+	GSIERR("CH%2lu CTX5  0x%x\n", chan_hdl, val);
 	val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_CNTXT_6,
 		gsi_ctx->per.ee, chan_hdl);
-	GSIERR("CH%2d CTX6  0x%x\n", chan_hdl, val);
+	GSIERR("CH%2lu CTX6  0x%x\n", chan_hdl, val);
 	val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_CNTXT_7,
 		gsi_ctx->per.ee, chan_hdl);
-	GSIERR("CH%2d CTX7  0x%x\n", chan_hdl, val);
+	GSIERR("CH%2lu CTX7  0x%x\n", chan_hdl, val);
 	if (gsi_ctx->per.ver >= GSI_VER_3_0) {
 		val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_CNTXT_8,
 			gsi_ctx->per.ee, chan_hdl);
-		GSIERR("CH%2d CTX8  0x%x\n", chan_hdl, val);
+		GSIERR("CH%2lu CTX8  0x%x\n", chan_hdl, val);
 	}
 	val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_RE_FETCH_READ_PTR,
 		gsi_ctx->per.ee, chan_hdl);
-	GSIERR("CH%2d REFRP 0x%x\n", chan_hdl, val);
+	GSIERR("CH%2lu REFRP 0x%x\n", chan_hdl, val);
 	val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_RE_FETCH_WRITE_PTR,
 		gsi_ctx->per.ee, chan_hdl);
-	GSIERR("CH%2d REFWP 0x%x\n", chan_hdl, val);
+	GSIERR("CH%2lu REFWP 0x%x\n", chan_hdl, val);
 	val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_QOS,
 		gsi_ctx->per.ee, chan_hdl);
-	GSIERR("CH%2d QOS   0x%x\n", chan_hdl, val);
+	GSIERR("CH%2lu QOS   0x%x\n", chan_hdl, val);
 	val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_SCRATCH_0,
 		gsi_ctx->per.ee, chan_hdl);
-	GSIERR("CH%2d SCR0  0x%x\n", chan_hdl, val);
+	GSIERR("CH%2lu SCR0  0x%x\n", chan_hdl, val);
 	val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_SCRATCH_1,
 		gsi_ctx->per.ee, chan_hdl);
-	GSIERR("CH%2d SCR1  0x%x\n", chan_hdl, val);
+	GSIERR("CH%2lu SCR1  0x%x\n", chan_hdl, val);
 	val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_SCRATCH_2,
 		gsi_ctx->per.ee, chan_hdl);
-	GSIERR("CH%2d SCR2  0x%x\n", chan_hdl, val);
+	GSIERR("CH%2lu SCR2  0x%x\n", chan_hdl, val);
 	val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_SCRATCH_3,
 		gsi_ctx->per.ee, chan_hdl);
-	GSIERR("CH%2d SCR3  0x%x\n", chan_hdl, val);
+	GSIERR("CH%2lu SCR3  0x%x\n", chan_hdl, val);
 	if (gsi_ctx->per.ver >= GSI_VER_3_0) {
 		val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_SCRATCH_4,
 			gsi_ctx->per.ee, chan_hdl);
-		GSIERR("CH%2d SCR4  0x%x\n", chan_hdl, val);
+		GSIERR("CH%2lu SCR4  0x%x\n", chan_hdl, val);
 		val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_SCRATCH_5,
 			gsi_ctx->per.ee, chan_hdl);
-		GSIERR("CH%2d SCR5  0x%x\n", chan_hdl, val);
+		GSIERR("CH%2lu SCR5  0x%x\n", chan_hdl, val);
 		val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_SCRATCH_6,
 			gsi_ctx->per.ee, chan_hdl);
-		GSIERR("CH%2d SCR6  0x%x\n", chan_hdl, val);
+		GSIERR("CH%2lu SCR6  0x%x\n", chan_hdl, val);
 		val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_SCRATCH_7,
 			gsi_ctx->per.ee, chan_hdl);
-		GSIERR("CH%2d SCR7  0x%x\n", chan_hdl, val);
+		GSIERR("CH%2lu SCR7  0x%x\n", chan_hdl, val);
 		val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_SCRATCH_8,
 			gsi_ctx->per.ee, chan_hdl);
-		GSIERR("CH%2d SCR8  0x%x\n", chan_hdl, val);
+		GSIERR("CH%2lu SCR8  0x%x\n", chan_hdl, val);
 		val = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_SCRATCH_9,
 			gsi_ctx->per.ee, chan_hdl);
-		GSIERR("CH%2d SCR9  0x%x\n", chan_hdl, val);
+		GSIERR("CH%2lu SCR9  0x%x\n", chan_hdl, val);
 	}
 
 	return;
@@ -3995,6 +4059,41 @@ int gsi_query_channel_info(unsigned long chan_hdl,
 }
 EXPORT_SYMBOL(gsi_query_channel_info);
 
+int gsi_is_teth_channel_empty(unsigned long chan_hdl, bool *is_empty)
+{
+	uint32_t rp;
+	uint32_t wp;
+
+	if (!gsi_ctx) {
+		pr_err("%s:%d gsi context not allocated\n", __func__, __LINE__);
+		return -GSI_STATUS_NODEV;
+	}
+
+	if (chan_hdl >= gsi_ctx->max_ch || !is_empty) {
+		GSIERR("bad params chan_hdl=%lu is_empty=%pK\n",
+				chan_hdl, is_empty);
+		return -GSI_STATUS_INVALID_PARAMS;
+	}
+
+	rp = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_CNTXT_4,
+			gsi_ctx->per.ee, chan_hdl);
+	rp = rp & 0xfffff; /* Only 20bits to be checked. */
+	wp = gsihal_read_reg_nk(GSI_EE_n_GSI_CH_k_RE_FETCH_WRITE_PTR,
+			gsi_ctx->per.ee, chan_hdl);
+	if (rp == wp) {
+		GSIDBG("Teth channel empty ch=%lu rp = 0x%x wp = 0x%x\n",
+				chan_hdl, rp, wp);
+		*is_empty = true;
+	} else {
+		GSIDBG("Teth channel not empty ch=%lu rp = 0x%x wp = 0x%x\n",
+				chan_hdl, rp, wp);
+		*is_empty = false;
+	}
+
+	return GSI_STATUS_SUCCESS;
+}
+EXPORT_SYMBOL_GPL(gsi_is_teth_channel_empty);
+
 int gsi_is_channel_empty(unsigned long chan_hdl, bool *is_empty)
 {
 	struct gsi_chan_ctx *ctx;
@@ -4280,7 +4379,7 @@ int gsi_queue_xfer(unsigned long chan_hdl, uint16_t num_xfers,
 	if (ctx->props.prot != GSI_CHAN_PROT_GCI) {
 		__gsi_query_channel_free_re(ctx, &free);
 		if (num_xfers > free) {
-			GSIERR("chan_hdl=%lu num_xfers=%u free=%u\n",
+			GSIERR_RL("chan_hdl=%lu num_xfers=%u free=%u\n",
 				chan_hdl, num_xfers, free);
 			spin_unlock_irqrestore(slock, flags);
 			return -GSI_STATUS_RING_INSUFFICIENT_SPACE;
@@ -4494,19 +4593,17 @@ int gsi_config_channel_mode(unsigned long chan_hdl, enum gsi_chan_mode mode)
 		return -GSI_STATUS_UNSUPPORTED_OP;
 	}
 
-	spin_lock_irqsave(&gsi_ctx->slock, flags);
-
 	if (atomic_read(&ctx->poll_mode))
 		curr = GSI_CHAN_MODE_POLL;
 	else
 		curr = GSI_CHAN_MODE_CALLBACK;
 
 	if (mode == curr) {
-		GSIERR("already in requested mode %u chan_hdl=%lu\n",
+		GSIDBG("already in requested mode %u chan_hdl=%lu\n",
 				curr, chan_hdl);
-		spin_unlock_irqrestore(&gsi_ctx->slock, flags);
 		return -GSI_STATUS_UNSUPPORTED_OP;
 	}
+	spin_lock_irqsave(&gsi_ctx->slock, flags);
 	if (curr == GSI_CHAN_MODE_CALLBACK &&
 			mode == GSI_CHAN_MODE_POLL) {
 		if (gsi_ctx->per.ver >= GSI_VER_3_0) {
@@ -5595,7 +5692,7 @@ int gsi_query_device_msi_addr(u64 *addr)
 	else
 		*addr = 0;
 
-	GSIDBG("Device MSI Addr: 0x%lx", *addr);
+	GSIDBG("Device MSI Addr: 0x%llx", *addr);
     return 0;
 }
 EXPORT_SYMBOL(gsi_query_device_msi_addr);
@@ -5669,6 +5766,17 @@ uint64_t gsi_read_chan_ring_re_fetch_wp(int chan_id, int ee)
 	return wp;
 }
 EXPORT_SYMBOL(gsi_read_chan_ring_re_fetch_wp);
+
+uint32_t gsi_get_outstanding_buffers(int ep_idx)
+{
+	uint32_t outstanding_buffers = 0;
+
+	outstanding_buffers = gsihal_read_reg_n(GSI_GSI_SHRAM_n,
+		((ep_idx * IPA_NUM_BYTES_PER_CHNL_SHRAM_5_5)
+		+ IPA_GSI_OFFSET_WORDS_SCRATCH_FOR_SEQ_HIGH_5_5));
+	return outstanding_buffers;
+}
+EXPORT_SYMBOL_GPL(gsi_get_outstanding_buffers);
 
 enum gsi_chan_prot gsi_get_chan_prot_type(int chan_hdl)
 {
@@ -5882,7 +5990,9 @@ static int msm_gsi_probe(struct platform_device *pdev)
 		GSIERR("No MSIs configured\n");
 	else {
 		if (gsi_ctx->msi.num > GSI_MAX_NUM_MSI) {
-			GSIERR("Num MSIs %u larger than max %u, normalizing\n");
+			GSIERR("Num MSIs %u larger than max %u, normalizing\n",
+				gsi_ctx->msi.num,
+				GSI_MAX_NUM_MSI);
 			gsi_ctx->msi.num = GSI_MAX_NUM_MSI;
 		} else GSIDBG("Num MSIs=%u\n", gsi_ctx->msi.num);
 	}

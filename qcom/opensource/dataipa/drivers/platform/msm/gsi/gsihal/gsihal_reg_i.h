@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
 * Copyright (c) 2020, The Linux Foundation. All rights reserved.
+* Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
 */
 
 #ifndef _GSIHAL_REG_I_H_
@@ -238,12 +239,12 @@
 #define GSI_EE_n_EV_CH_k_CNTXT_9_INTVEC_SHFT 0x0
 
 /* GSI_EE_n_EV_CH_k_CNTXT_10 */
-#define GSI_EE_n_EV_CH_k_CNTXT_10_MSI_ADDR_LSB_BMSK 0xffffffff
-#define GSI_EE_n_EV_CH_k_CNTXT_10_MSI_ADDR_LSB_SHFT 0x0
+#define GSI_EE_n_EV_CH_k_CNTXT_10_ADDR_LSB_BMSK 0xffffffff
+#define GSI_EE_n_EV_CH_k_CNTXT_10_ADDR_LSB_SHFT 0x0
 
 /* GSI_EE_n_EV_CH_k_CNTXT_11 */
-#define GSI_EE_n_EV_CH_k_CNTXT_11_MSI_ADDR_MSB_BMSK 0xffffffff
-#define GSI_EE_n_EV_CH_k_CNTXT_11_MSI_ADDR_MSB_SHFT 0x0
+#define GSI_EE_n_EV_CH_k_CNTXT_11_ADDR_MSB_BMSK 0xffffffff
+#define GSI_EE_n_EV_CH_k_CNTXT_11_ADDR_MSB_SHFT 0x0
 
 /* GSI_EE_n_EV_CH_k_CNTXT_12 */
 #define GSI_EE_n_EV_CH_k_CNTXT_12_RP_UPDATE_ADDR_LSB_BMSK 0xffffffff

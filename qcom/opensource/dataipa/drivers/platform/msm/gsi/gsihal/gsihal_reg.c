@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
 * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
+* Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
 */
 
 #include "gsihal_i.h"
@@ -746,23 +747,23 @@ static void gsireg_construct_ev_ch_k_cntxt_9(enum gsihal_reg_name reg,
 static void gsireg_construct_ev_ch_k_cntxt_10(enum gsihal_reg_name reg,
 	const void *fields, u32 *val)
 {
-	struct gsihal_reg_ev_ch_k_cntxt_10 *ctxt =
-		(struct gsihal_reg_ev_ch_k_cntxt_10 *)fields;
+	union gsihal_reg_ev_ch_k_cntxt_10 *ctxt =
+		(union gsihal_reg_ev_ch_k_cntxt_10 *)fields;
 
 	GSI_SETFIELD_IN_REG(*val, ctxt->msi_addr_lsb,
-		GSI_EE_n_EV_CH_k_CNTXT_10_MSI_ADDR_LSB_SHFT,
-		GSI_EE_n_EV_CH_k_CNTXT_10_MSI_ADDR_LSB_BMSK);
+		GSI_EE_n_EV_CH_k_CNTXT_10_ADDR_LSB_SHFT,
+		GSI_EE_n_EV_CH_k_CNTXT_10_ADDR_LSB_BMSK);
 }
 
 static void gsireg_construct_ev_ch_k_cntxt_11(enum gsihal_reg_name reg,
 	const void *fields, u32 *val)
 {
-	struct gsihal_reg_ev_ch_k_cntxt_11 *ctxt =
-		(struct gsihal_reg_ev_ch_k_cntxt_11 *)fields;
+	union gsihal_reg_ev_ch_k_cntxt_11 *ctxt =
+		(union gsihal_reg_ev_ch_k_cntxt_11 *)fields;
 
 	GSI_SETFIELD_IN_REG(*val, ctxt->msi_addr_msb,
-		GSI_EE_n_EV_CH_k_CNTXT_11_MSI_ADDR_MSB_SHFT,
-		GSI_EE_n_EV_CH_k_CNTXT_11_MSI_ADDR_MSB_BMSK);
+		GSI_EE_n_EV_CH_k_CNTXT_11_ADDR_MSB_SHFT,
+		GSI_EE_n_EV_CH_k_CNTXT_11_ADDR_MSB_BMSK);
 }
 
 static void gsireg_construct_ev_ch_k_cntxt_12(enum gsihal_reg_name reg,
@@ -2421,9 +2422,9 @@ unsigned long gsihal_get_inst_ram_size(void)
 	case GSI_VER_3_0:
 		maxn = GSI_V3_0_GSI_INST_RAM_n_MAXn;
 		break;
-        case GSI_VER_5_2:
-                maxn = GSI_V5_2_GSI_INST_RAM_n_MAXn;
-                break;
+	case GSI_VER_5_2:
+		maxn = GSI_V5_2_GSI_INST_RAM_n_MAXn;
+		break;
 	case GSI_VER_ERR:
 	case GSI_VER_MAX:
 	default:

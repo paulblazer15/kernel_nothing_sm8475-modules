@@ -1,6 +1,7 @@
 ﻿// SPDX-License-Identifier: GPL-2.0-only
 /*
 * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
+* Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
 */
 
 #include <linux/types.h>	/* u32 */
@@ -17,7 +18,7 @@
 #include <linux/dma-mapping.h>	/* dma_alloc_coherent() */
 #include <linux/io.h>
 #include <linux/uaccess.h>
-#include <linux/ipa.h>
+#include "ipa.h"
 #include <linux/sched.h>
 #include <linux/skbuff.h>	/* sk_buff */
 #include <linux/kfifo.h>  /* Kernel FIFO Implementation */
@@ -86,7 +87,6 @@
 #define EXCEPTION_KFIFO_SIZE (8)
 #define EXCEPTION_KFIFO_SLEEP_MS (EXCEPTION_KFIFO_SLEEP_MS)
 #define EXCEPTION_KFIFO_DEBUG_VERBOSE 1
-#define SAVE_HEADER 1
 
 #define IPATEST_DBG(fmt, args...) \
 	do { \
@@ -350,12 +350,12 @@ static ssize_t channel_write_gsi(struct file *filp, const char __user *buf,
 	int res = 0;
 	void *data_address = channel_dev->mem.base
 		+ channel_dev->mem_buff_index * TX_BUFF_SIZE;
-	u32 data_phys_addr = channel_dev->mem.phys_base
+	u64 data_phys_addr = channel_dev->mem.phys_base
 		+ channel_dev->mem_buff_index * TX_BUFF_SIZE;
 	struct gsi_xfer_elem gsi_xfer;
 
 	if (count > (RX_BUFF_SIZE))
-		IPATEST_ERR("-----PROBLEM----- count=%zu RX_BUFF_SIZE=%d\n",
+		IPATEST_ERR("-----PROBLEM----- count=%zu RX_BUFF_SIZE=%lu\n",
 		count, RX_BUFF_SIZE);
 
 	/* Copy the data from the user and transmit */
@@ -413,7 +413,7 @@ static ssize_t channel_read_gsi(struct file *filp, char __user *buf,
 			break;
 
 		IPATEST_DBG("channel empty %d/%d\n", i + 1, max_retry);
-		msleep(5);
+		msleep(1000);
 	}
 
 	if (i == max_retry) {
@@ -448,6 +448,8 @@ static ssize_t channel_read_gsi(struct file *filp, char __user *buf,
 		IPATEST_ERR("gsi_queue_xfer failed %d\n", res);
 		return 0;
 	}
+
+	msleep(20);
 
 	IPATEST_DBG("Returning %d.\n", xfer_notify.bytes_xfered);
 	return xfer_notify.bytes_xfered;
@@ -533,7 +535,7 @@ int create_channel_device_by_type(
 
 	channel_dev = *channel_dev_ptr;
 
-	strlcpy(channel_dev->name, name, MAX_CHANNEL_NAME);
+	strscpy(channel_dev->name, name, MAX_CHANNEL_NAME);
 
 	/* Allocate memory data buffer for the pipe */
 	IPATEST_DBG(":-----Allocate memory data buffer-----\n");
@@ -553,7 +555,8 @@ int create_channel_device_by_type(
 	/* Add a pointer from the channel device to the test context info */
 	channel_dev->test = ipa_test;
 
-	channel_dev->class = class_create(THIS_MODULE, channel_dev->name);
+	channel_dev->class = class_create(channel_dev->name);
+
 	if (IS_ERR(channel_dev->class)) {
 		IPATEST_ERR(":class_create() err.\n");
 		ret = -ENOMEM;
@@ -690,7 +693,9 @@ static struct sk_buff *datapath_create_skb(const char *buf, size_t size)
 {
 	struct sk_buff *skb;
 	unsigned char *data;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,10,0)
 	int err = 0;
+#endif
 
 	IPATEST_DBG("allocating SKB, len=%zu", size);
 	skb = alloc_skb(size, GFP_KERNEL);
@@ -703,10 +708,13 @@ static struct sk_buff *datapath_create_skb(const char *buf, size_t size)
 		return NULL;
 	}
 	IPATEST_DBG("skb put finish, skb->len=%d", skb->len);
-	skb->csum = csum_and_copy_from_user(
-			buf, data,
-			size, 0, &err);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0)
+	skb->csum = csum_and_copy_from_user(buf, data, size);
+	if (!skb->csum) {
+#else
+	skb->csum = csum_and_copy_from_user(buf, data, size, 0, &err);
 	if (err) {
+#endif
 		kfree_skb(skb);
 		return NULL;
 	}
@@ -1209,7 +1217,7 @@ int connect_apps_to_ipa(struct test_endpoint_sys *tx_ep,
 	tx_ep->gsi_channel_props.low_weight = 1;
 	tx_ep->gsi_channel_props.chan_user_data = tx_ep;
 	if (ipa_get_hw_type() >= IPA_HW_v4_9)
-		tx_ep->gsi_channel_props.db_in_bytes = 1; 
+		tx_ep->gsi_channel_props.db_in_bytes = 1;
 
 	tx_ep->gsi_channel_props.err_cb = ipa_test_gsi_chan_err_cb;
 	tx_ep->gsi_channel_props.xfer_cb = ipa_test_gsi_irq_notify_cb;
@@ -1258,7 +1266,7 @@ int configure_ipa_endpoint(struct ipa_ep_cfg *ipa_ep_cfg,
 	rt_rule->commit = 1;
 	rt_rule->num_rules = 1;
 	rt_rule->ip = IPA_IP_v4;
-	strlcpy(rt_rule->rt_tbl_name,
+	strscpy(rt_rule->rt_tbl_name,
 			DEFAULT_ROUTING_TABLE_NAME,
 			IPA_RESOURCE_NAME_MAX);
 	rt_rule_entry = &rt_rule->rules[0];
@@ -1282,7 +1290,7 @@ int configure_ipa_endpoint(struct ipa_ep_cfg *ipa_ep_cfg,
 		also increment an internal reference count. */
 	memset(&rt_lookup, 0, sizeof(struct ipa_ioc_get_rt_tbl));
 	rt_lookup.ip = IPA_IP_v4;
-	strlcpy(rt_lookup.name,
+	strscpy(rt_lookup.name,
 			DEFAULT_ROUTING_TABLE_NAME,
 			IPA_RESOURCE_NAME_MAX);
 	if (ipa3_get_rt_tbl(&rt_lookup)) {
@@ -2380,7 +2388,7 @@ void suspend_handler(enum ipa_irq_type interrupt,
 	gsi_chan_hdl =
 		((struct ipa_tx_suspend_private_data *)private_data)->gsi_chan_hdl;
 
-	IPATEST_DBG("in suspend handler: interrupt=%d, private_data=%d, interrupt_data=",
+	IPATEST_DBG("in suspend handler: interrupt=%d, clnt_hdl=%d, private_data=%d, interrupt_data=%d",
 			 interrupt, clnt_hdl, suspend_data[0], suspend_data[1]);
 	for (i = 0; i < IPA_EP_ARR_SIZE; i++)
 		IPATEST_DBG("%d", suspend_data[i]);
@@ -2617,13 +2625,8 @@ void notify_upon_exception(void *priv,
 		return;
 	}
 
-#if (SAVE_HEADER)
-	data_len = p_sk_buff->len + 8; /* store len */
-	p_data = (p_sk_buff->data) - 8; /* store pointer to the data */
-#else
 	data_len = p_sk_buff->len; /* store len */
 	p_data = p_sk_buff->data; /* store pointer to the data */
-#endif
 
 #if (EXCEPTION_KFIFO_DEBUG_VERBOSE)
 		IPATEST_DBG("Exception packet length = %zu,Packet content:\n",
@@ -2682,8 +2685,10 @@ int exception_hdl_init(void)
 		IPATEST_ERR("alloc_chrdev_region failed (%d)\n", res);
 		return res;
 	}
+
 	p_exception_hdl_data->class =
-			class_create(THIS_MODULE, EXCEPTION_DRV_NAME);
+			class_create(EXCEPTION_DRV_NAME);
+
 	p_exception_hdl_data->dev =
 			device_create(p_exception_hdl_data->class
 					, NULL, p_exception_hdl_data->dev_num,
@@ -2740,13 +2745,6 @@ int configure_system_7(void)
 	u32 ipa_pipe_num;
 
 	memset(&ipa_ep_cfg, 0, sizeof(ipa_ep_cfg));
-
-	res = exception_hdl_init();
-	if (0 != res) {
-		IPATEST_ERR("exception_hdl_init() failed (%d)\n", res);
-		return res;
-	}
-
 
 	/* Connect first Rx IPA --> APPS MEM */
 	memset(&sys_in, 0, sizeof(sys_in));
@@ -3134,7 +3132,8 @@ int configure_system_20(void)
 	u32 ipa_pipe_num;
 
 	memset(&ipa_ep_cfg, 0, sizeof(ipa_ep_cfg));
-
+	ipa_ep_cfg.hdr.hdr_len = 18;
+	sys_in.ipa_ep_cfg = ipa_ep_cfg;
 
 	/* Connect first Rx IPA --> AP MEM */
 	memset(&sys_in, 0, sizeof(sys_in));
@@ -4215,6 +4214,8 @@ static int configure_app_to_ipa_path(struct ipa_channel_config __user *to_ipa_us
 	/* Connect IPA --> Apps */
 	memset(&sys_in, 0, sizeof(sys_in));
 	sys_in.client = to_ipa_channel_config.client;
+	sys_in.notify = &notify_upon_exception;
+	sys_in.priv = &(p_exception_hdl_data->notify_cb_data);
 	IPATEST_DBG("copying from 0x%px\n", to_ipa_channel_config.cfg);
 	retval = copy_from_user(&sys_in.ipa_ep_cfg, to_ipa_channel_config.cfg, to_ipa_channel_config.config_size);
 	if (retval) {
@@ -4379,6 +4380,12 @@ static int configure_test_scenario(
 		return -EFAULT;
 	}
 
+	if (isUlso) {
+		rx_size = RX_SZ_ULSO;
+	} else {
+		rx_size = RX_SZ;
+	}
+
 	for (i = 0 ; i < ipa_test_config_header->from_ipa_channels_num ; i++) {
 		IPATEST_DBG("starting configuration of from_ipa_%d\n", i);
 		retval = configure_app_from_ipa_path(from_ipa_channel_config_array[i], isUlso);
@@ -4386,12 +4393,6 @@ static int configure_test_scenario(
 			IPATEST_ERR("fail to configure from_ipa_%d", i);
 			goto fail;
 		}
-	}
-
-	if (isUlso) {
-		rx_size = RX_SZ_ULSO;
-	} else {
-		rx_size = RX_SZ;
 	}
 
 	retval = insert_descriptors_into_rx_endpoints(RX_BUFF_SIZE);
@@ -4426,33 +4427,41 @@ fail:
 
 static int handle_add_hdr_hpc(unsigned long ioctl_arg)
 {
-    struct ipa_ioc_add_hdr hdrs;
+    struct ipa_ioc_add_hdr *hdrs;
     struct ipa_hdr_add *hdr;
     int retval;
 
 	IPATEST_ERR("copying from 0x%px\n", (u8 *)ioctl_arg);
-	retval = copy_from_user(&hdrs, (u8 *)ioctl_arg, sizeof(hdrs) + sizeof(*hdr));
+	hdrs = kzalloc(sizeof(struct ipa_ioc_add_hdr) + sizeof(struct ipa_hdr_add), GFP_KERNEL);
+	if (!hdrs)
+		return -ENOMEM;
+	retval = copy_from_user(hdrs, (u8 *)ioctl_arg,
+				sizeof(struct ipa_ioc_add_hdr) + sizeof(struct ipa_hdr_add));
 	if (retval) {
 			IPATEST_ERR("failing copying header from user\n");
+			kfree(hdrs);
 			return retval;
 	}
-    retval = ipa3_add_hdr_hpc(&hdrs);
+    retval = ipa3_add_hdr_hpc(hdrs);
     if (retval) {
         IPATEST_ERR("ipa3_add_hdr_hpc failed\n");
+        kfree(hdrs);
         return retval;
     }
 	IPATEST_ERR("ELIAD: \n");
-	hdr = &hdrs.hdr[0];
+	hdr = &hdrs->hdr[0];
     if (hdr->status) {
         IPATEST_ERR("ipa3_add_hdr_hpc failed\n");
         return hdr->status;
     }
 	IPATEST_ERR("ELIAD: \n");
-    if (copy_to_user((void __user *)ioctl_arg, &hdrs, sizeof(hdrs) + sizeof(*hdr))) {
+    if (copy_to_user((void __user *)ioctl_arg, hdrs,
+	    sizeof(struct ipa_ioc_add_hdr) + sizeof(struct ipa_hdr_add))) {
         retval = -EFAULT;
     }
 	IPATEST_ERR("ELIAD: \n");
 
+	kfree(hdrs);
     return 0;
 }
 
@@ -4776,7 +4785,7 @@ static int __init ipa_test_init(void)
 	ipa_test->signature = TEST_SIGNATURE;
 	ipa_test->current_configuration_idx = -1;
 
-	ipa_test_class = class_create(THIS_MODULE, IPA_TEST_DRV_NAME);
+	ipa_test_class = class_create(IPA_TEST_DRV_NAME);
 
 	ret = alloc_chrdev_region(&ipa_test->dev_num, 0, 1, IPA_TEST_DRV_NAME);
 	if (ret) {
@@ -4813,6 +4822,10 @@ static int __init ipa_test_init(void)
 	ret = datapath_ds_init();
 	if (ret != 0)
 		IPATEST_DBG("datapath_ds_init() failed (%d)\n", ret);
+
+	ret = exception_hdl_init();
+	if (ret != 0)
+		IPATEST_DBG("exception_hdl_init() failed (%d)\n", ret);
 
 	return ret;
 }

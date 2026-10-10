@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include "ipa_ut_framework.h"
-#include <linux/ipa_eth.h>
-#include <linux/ipa.h>
+#include "ipa_eth.h"
+#include "ipa.h"
 #include <linux/delay.h>
 #include "ipa_i.h"
 
@@ -441,7 +442,7 @@ fail_alloc_mmio:
 	return ret;
 }
 
-static void ipa_ntn_test_print_stats()
+static void ipa_ntn_test_print_stats(void)
 {
 	struct ipa_uc_dbg_ring_stats stats;
 	int ret;
@@ -532,7 +533,7 @@ static int ipa_ntn_test_ready_cb(void *priv)
 	return 0;
 }
 
-static void ipa_ntn_test_del_client_list()
+static void ipa_ntn_test_del_client_list(void)
 {
 	struct ipa_eth_client *eth_client = &test_ntn_ctx->client;
 	struct ipa_eth_client_pipe_info *pipe_info, *tmp;
@@ -575,7 +576,7 @@ static int ipa_ntn_test_setup_pipes(void)
 	test_ntn_ctx->rx_pipe_info.info.transfer_ring_sgt =
 		test_ntn_ctx->rx_transfer_ring_sgt;
 
-	IPA_UT_DBG("rx TR phys 0x%X, cpu 0x%X, size %d, sgt 0x%X\n",
+	IPA_UT_DBG("rx TR phys 0x%llX, cpu 0x%p, size %d, sgt 0x%p\n",
 		test_ntn_ctx->rx_transfer_ring_addr.phys_base,
 		test_ntn_ctx->rx_transfer_ring_addr.base,
 		test_ntn_ctx->rx_transfer_ring_addr.size,
@@ -589,7 +590,7 @@ static int ipa_ntn_test_setup_pipes(void)
 	test_ntn_ctx->rx_pipe_info.info.buffer_pool_base_sgt =
 		test_ntn_ctx->rx_buff_sgt;
 
-	IPA_UT_DBG("rx buff phys 0x%X, cpu 0x%X, size %d, fix size %d sgt 0x%X\n"
+	IPA_UT_DBG("rx buff phys 0x%llX, cpu 0x%p, size %d, fix size %d sgt 0x%p\n"
 		, test_ntn_ctx->rx_buf.phys_base,
 		test_ntn_ctx->rx_buf.base,
 		test_ntn_ctx->rx_buf.size,
@@ -611,7 +612,7 @@ static int ipa_ntn_test_setup_pipes(void)
 	test_ntn_ctx->rx_pipe_info.info.client_info.ntn.tail_ptr_offs =
 		RX_TAIL_PTR_OFF;
 
-	IPA_UT_DBG("tail registers bar: phys 0x%X virt 0x%X\n",
+	IPA_UT_DBG("tail registers bar: phys 0x%llX virt 0x%p\n",
 		test_ntn_ctx->bar_addr.phys_base, test_ntn_ctx->bar_addr.base);
 
 	/* TX pipe */
@@ -626,7 +627,7 @@ static int ipa_ntn_test_setup_pipes(void)
 	test_ntn_ctx->tx_pipe_info.info.transfer_ring_sgt =
 		test_ntn_ctx->tx_transfer_ring_sgt;
 
-	IPA_UT_DBG("tx TR phys 0x%X, cpu 0x%X, size %d, sgt 0x%X\n",
+	IPA_UT_DBG("tx TR phys 0x%llX, cpu 0x%p, size %d, sgt 0x%p\n",
 		test_ntn_ctx->tx_transfer_ring_addr.phys_base,
 		test_ntn_ctx->tx_transfer_ring_addr.base,
 		test_ntn_ctx->tx_transfer_ring_addr.size,
@@ -647,16 +648,16 @@ static int ipa_ntn_test_setup_pipes(void)
 			((phys_addr_t)(test_ntn_ctx->tx_buf.base +
 			(BUFFER_SIZE * i)) & ~PAGE_MASK);
 
-		IPA_UT_DBG("tx_pipe_info.info.data_buff_list[%d].iova = 0x%lx",
+		IPA_UT_DBG("tx_pipe_info.info.data_buff_list[%d].iova = 0x%llx",
 			i,
 			test_ntn_ctx->tx_pipe_info.info.data_buff_list[i].iova);
-		IPA_UT_DBG("tx_pipe_info.info.data_buff_list[%d].pa = 0x%lx",
+		IPA_UT_DBG("tx_pipe_info.info.data_buff_list[%d].pa = 0x%llx",
 			i,
 			test_ntn_ctx->tx_pipe_info.info.data_buff_list[i].pa);
 	}
 	test_ntn_ctx->tx_pipe_info.info.data_buff_list_size = NUM_TX_BUFS;
 
-	IPA_UT_DBG("tx buff phys 0x%X, cpu 0x%X, size %d, fix size %d sgt 0x%X\n"
+	IPA_UT_DBG("tx buff phys 0x%llX, cpu 0x%p, size %d, fix size %d sgt 0x%p\n"
 		, test_ntn_ctx->tx_buf.phys_base,
 		test_ntn_ctx->tx_buf.base,
 		test_ntn_ctx->tx_buf.size,
@@ -987,7 +988,7 @@ static int ipa_ntn_test_prepare_test(void)
 	offset = sizeof(struct rx_transfer_ring_ele) * (NUM_RX_TR_ELE - 1);
 	IPA_UT_DBG("ofset 0x%X\n", offset);
 
-	IPA_UT_DBG("writing to RX tail ptr in 0x%X le value of 0x%X",
+	IPA_UT_DBG("writing to RX tail ptr in 0x%p le value of 0x%X",
 		(u32 *)((char *)test_ntn_ctx->bar_addr.base + RX_TAIL_PTR_OFF),
 		lower_32_bits(test_ntn_ctx->rx_transfer_ring_addr.phys_base +
 			offset));
@@ -998,7 +999,7 @@ static int ipa_ntn_test_prepare_test(void)
 			offset));
 
 	/* initialize tx tail to the beginning of the ring */
-	IPA_UT_DBG("writing to TX tail ptr in 0x%X le value of 0x%X",
+	IPA_UT_DBG("writing to TX tail ptr in 0x%p le value of 0x%X",
 		(u32 *)((char *)test_ntn_ctx->bar_addr.base + TX_TAIL_PTR_OFF),
 		lower_32_bits(test_ntn_ctx->tx_transfer_ring_addr.phys_base));
 
@@ -1240,7 +1241,7 @@ static int ipa_ntn_send_packet_burst(void)
 	 * ring full stats for RX
 	 */
 	ep_cfg_ctrl.ipa_ep_delay = true;
-	ret = ipa3_cfg_ep_ctrl(
+	ret = ipa_cfg_ep_ctrl(
 		ipa_get_ep_mapping(test_ntn_ctx->prod_client_type),
 		&ep_cfg_ctrl);
 	if (ret) {
@@ -1275,7 +1276,7 @@ static int ipa_ntn_send_packet_burst(void)
 	IPA_UT_DBG("sleep before removing delay\n");
 	msleep(20);
 	ep_cfg_ctrl.ipa_ep_delay = false;
-	ret = ipa3_cfg_ep_ctrl(
+	ret = ipa_cfg_ep_ctrl(
 		ipa_get_ep_mapping(test_ntn_ctx->prod_client_type),
 		&ep_cfg_ctrl);
 	if (ret) {

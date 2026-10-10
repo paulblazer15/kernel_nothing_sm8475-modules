@@ -1,20 +1,26 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ *
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
-#include "ipa_i.h"
-
 #ifdef CONFIG_DEBUG_FS
+
 #include <linux/debugfs.h>
 #include <linux/kernel.h>
 #include <linux/stringify.h>
+#include "ipa_i.h"
 #include "ipa_rm_i.h"
+#include "ipahal_reg.h"
 #include "ipahal_nat.h"
 #include "ipa_odl.h"
 #include "ipa_qmi_service.h"
-
+#if defined(CONFIG_IPA_TSP)
+/* The following line should be removed once TSP feature is POR */
+#include "ipa_test_module_tsp.h"
+#include "ipahal_tsp.h"
+#endif
 #define IPA_MAX_ENTRY_STRING_LEN 500
 #define IPA_MAX_MSG_LEN 4096
 #define IPA_DBG_MAX_RULE_IN_TBL 128
@@ -102,7 +108,6 @@ const char *ipa3_event_name[IPA_EVENT_MAX_NUM] = {
 	__stringify(IPA_IPPT_SW_FLT_EVENT),
 	__stringify(IPA_MACSEC_ADD_EVENT),
 	__stringify(IPA_MACSEC_DEL_EVENT),
-	__stringify(IPA_DONE_RESTORE_EVENT),
 };
 
 const char *ipa3_hdr_l2_type_name[] = {
@@ -368,7 +373,8 @@ int _ipa_read_ep_reg_v3_0(char *buf, int max_len, int pipe)
 		"IPA_ENDP_INIT_HOL_EN_%u=0x%x\n"
 		"IPA_ENDP_INIT_HOL_TIMER_%u=0x%x\n"
 		"IPA_ENDP_INIT_DEAGGR_%u=0x%x\n"
-		"IPA_ENDP_INIT_CFG_%u=0x%x\n",
+		"IPA_ENDP_INIT_CFG_%u=0x%x\n"
+		"IPA_ENDP_INIT_PROD_CFG_%u=0x%x\n",
 		pipe, ipahal_read_reg_n(IPA_ENDP_INIT_NAT_n, pipe),
 		pipe, ipahal_read_reg_n(IPA_ENDP_INIT_HDR_n, pipe),
 		pipe, ipahal_read_reg_n(IPA_ENDP_INIT_HDR_EXT_n, pipe),
@@ -379,7 +385,8 @@ int _ipa_read_ep_reg_v3_0(char *buf, int max_len, int pipe)
 		pipe, ipahal_read_reg_n(IPA_ENDP_INIT_HOL_BLOCK_EN_n, pipe),
 		pipe, ipahal_read_reg_n(IPA_ENDP_INIT_HOL_BLOCK_TIMER_n, pipe),
 		pipe, ipahal_read_reg_n(IPA_ENDP_INIT_DEAGGR_n, pipe),
-		pipe, ipahal_read_reg_n(IPA_ENDP_INIT_CFG_n, pipe));
+		pipe, ipahal_read_reg_n(IPA_ENDP_INIT_CFG_n, pipe),
+		pipe, ipahal_read_reg_n(IPA_ENDP_INIT_PROD_CFG_n, pipe));
 }
 
 /**
@@ -1077,6 +1084,7 @@ static ssize_t ipa3_read_rt(struct file *file, char __user *ubuf, size_t count,
 
 	mutex_lock(&ipa3_ctx->lock);
 
+	pr_err("==== Routing Tables Start ====\n");
 	if (ipa3_ctx->rt_tbl_hash_lcl[ip])
 		pr_err("Hashable table resides on local memory\n");
 	else
@@ -1101,7 +1109,7 @@ static ssize_t ipa3_read_rt(struct file *file, char __user *ubuf, size_t count,
 					>> 5;
 				pr_err("rule_idx:%d dst:%d ep:%d S:%u ",
 					i, entry->rule.dst,
-					ipa3_get_ep_mapping(entry->rule.dst),
+					ipa_get_ep_mapping(entry->rule.dst),
 					!ipa3_ctx->hdr_proc_ctx_tbl_lcl);
 				pr_err("proc_ctx[32B]:%u attrib_mask:%08x ",
 					ofst_words,
@@ -1113,7 +1121,7 @@ static ssize_t ipa3_read_rt(struct file *file, char __user *ubuf, size_t count,
 					ofst = 0;
 				pr_err("rule_idx:%d dst:%d ep:%d S:%u ",
 					i, entry->rule.dst,
-					ipa3_get_ep_mapping(entry->rule.dst),
+					ipa_get_ep_mapping(entry->rule.dst),
 					!(entry->hdr && entry->hdr->is_lcl));
 				pr_err("hdr_ofst[words]:%u attrib_mask:%08x ",
 					ofst >> 2,
@@ -1131,11 +1139,14 @@ static ssize_t ipa3_read_rt(struct file *file, char __user *ubuf, size_t count,
 			if (ipa3_ctx->ipa_hw_type >= IPA_HW_v5_0)
 				pr_err("close_aggr_irq_mod: %u\n",
 					entry->rule.close_aggr_irq_mod);
+			if (ipa3_ctx->ipa_hw_type >= IPA_HW_v5_5)
+				pr_err("ttl_update: %u\n", entry->rule.ttl_update);
 
 			ipa3_attrib_dump(&entry->rule.attrib, ip);
 			i++;
 		}
 	}
+	pr_err("==== Routing Tables End ====\n");
 	mutex_unlock(&ipa3_ctx->lock);
 
 	return 0;
@@ -1312,6 +1323,7 @@ static ssize_t ipa3_read_flt(struct file *file, char __user *ubuf, size_t count,
 
 	mutex_lock(&ipa3_ctx->lock);
 
+	pr_err("==== Filtering Tables Start ====\n");
 	if (ipa3_ctx->flt_tbl_hash_lcl[ip])
 		pr_err("Hashable table resides on local memory\n");
 	else
@@ -1379,9 +1391,12 @@ static ssize_t ipa3_read_flt(struct file *file, char __user *ubuf, size_t count,
 				ipa3_attrib_dump(
 					&entry->rule.attrib, ip);
 			i++;
+			if (ipa3_ctx->ipa_hw_type >= IPA_HW_v5_5)
+				pr_err("ttl_update %u ", entry->rule.ttl_update);
 		}
 	}
 bail:
+	pr_err("==== Filtering Tables End ====\n");
 	mutex_unlock(&ipa3_ctx->lock);
 
 	return res;
@@ -1534,13 +1549,17 @@ static ssize_t ipa3_read_stats(struct file *file, char __user *ubuf,
 		"flow_enable=%u\n"
 		"flow_disable=%u\n"
 		"rx_page_drop_cnt=%u\n"
-		"lower_order=%u\n"
+		"lower_order=%llu\n"
 		"rmnet_notifier_enabled=%u\n"
 		"num_buff_above_thresh_for_def_pipe_notified=%u\n"
 		"num_buff_below_thresh_for_def_pipe_notified=%u\n"
 		"num_buff_above_thresh_for_coal_pipe_notified=%u\n"
 		"num_buff_below_thresh_for_coal_pipe_notified=%u\n"
-		"pipe_setup_fail_cnt=%u\n",
+		"num_buff_above_thresh_for_ll_pipe_notified=%u\n"
+		"num_buff_below_thresh_for_ll_pipe_notified=%u\n"
+		"num_free_page_task_scheduled=%u\n"
+		"pipe_setup_fail_cnt=%u\n"
+		"ttl_count=%u\n",
 		ipa3_ctx->stats.tx_sw_pkts,
 		ipa3_ctx->stats.tx_hw_pkts,
 		ipa3_ctx->stats.tx_non_linear,
@@ -1567,7 +1586,11 @@ static ssize_t ipa3_read_stats(struct file *file, char __user *ubuf,
 		atomic_read(&ipa3_ctx->stats.num_buff_below_thresh_for_def_pipe_notified),
 		atomic_read(&ipa3_ctx->stats.num_buff_above_thresh_for_coal_pipe_notified),
 		atomic_read(&ipa3_ctx->stats.num_buff_below_thresh_for_coal_pipe_notified),
-		ipa3_ctx->stats.pipe_setup_fail_cnt
+		atomic_read(&ipa3_ctx->stats.num_buff_above_thresh_for_ll_pipe_notified),
+		atomic_read(&ipa3_ctx->stats.num_buff_below_thresh_for_ll_pipe_notified),
+		atomic_read(&ipa3_ctx->stats.num_free_page_task_scheduled),
+		ipa3_ctx->stats.pipe_setup_fail_cnt,
+		ipa3_ctx->stats.ttl_cnt
 		);
 	cnt += nbytes;
 
@@ -1588,11 +1611,6 @@ static ssize_t ipa3_read_odlstats(struct file *file, char __user *ubuf,
 {
 	int nbytes;
 	int cnt = 0;
-
-	if (!ipa3_odl_ctx) {
-                IPADBG("ODL stats not supported\n");
-                return 0;
-	}
 
 	nbytes = scnprintf(dbg_buff, IPA_MAX_MSG_LEN,
 			"ODL received pkt =%u\n"
@@ -1616,33 +1634,40 @@ static ssize_t ipa3_read_page_recycle_stats(struct file *file,
 	int nbytes;
 	int cnt = 0, i = 0, k = 0;
 
-	nbytes = scnprintf(dbg_buff, IPA_MAX_MSG_LEN,
-			"COAL : Total number of packets replenished =%llu\n"
-			"COAL : Number of page recycled packets  =%llu\n"
-			"COAL : Number of tmp alloc packets  =%llu\n"
-			"COAL  : Number of times tasklet scheduled  =%llu\n"
-			"DEF  : Total number of packets replenished =%llu\n"
-			"DEF  : Number of page recycled packets =%llu\n"
-			"DEF  : Number of tmp alloc packets  =%llu\n"
-			"DEF  : Number of times tasklet scheduled  =%llu\n"
-			"COMMON  : Number of page recycled in tasklet  =%llu\n"
-			"COMMON  : Number of times free pages not found in tasklet =%llu\n",
-			ipa3_ctx->stats.page_recycle_stats[0].total_replenished,
-			ipa3_ctx->stats.page_recycle_stats[0].page_recycled,
-			ipa3_ctx->stats.page_recycle_stats[0].tmp_alloc,
-			ipa3_ctx->stats.num_sort_tasklet_sched[0],
-			ipa3_ctx->stats.page_recycle_stats[1].total_replenished,
-			ipa3_ctx->stats.page_recycle_stats[1].page_recycled,
-			ipa3_ctx->stats.page_recycle_stats[1].tmp_alloc,
-			ipa3_ctx->stats.num_sort_tasklet_sched[1],
-			ipa3_ctx->stats.page_recycle_cnt_in_tasklet,
-			ipa3_ctx->stats.num_of_times_wq_reschd);
+	nbytes = scnprintf(
+		dbg_buff, IPA_MAX_MSG_LEN,
+		"COAL   : Total number of packets replenished =%llu\n"
+		"COAL   : Number of page recycled packets  =%llu\n"
+		"COAL   : Number of tmp alloc packets  =%llu\n"
+		"COAL   : Number of times tasklet scheduled  =%llu\n"
+
+		"DEF    : Total number of packets replenished =%llu\n"
+		"DEF    : Number of page recycled packets =%llu\n"
+		"DEF    : Number of tmp alloc packets  =%llu\n"
+		"DEF    : Number of times tasklet scheduled  =%llu\n"
+
+		"COMMON : Number of page recycled in tasklet  =%llu\n"
+		"COMMON : Number of times free pages not found in tasklet =%llu\n",
+
+		ipa3_ctx->stats.page_recycle_stats[0].total_replenished,
+		ipa3_ctx->stats.page_recycle_stats[0].page_recycled,
+		ipa3_ctx->stats.page_recycle_stats[0].tmp_alloc,
+		ipa3_ctx->stats.num_sort_tasklet_sched[0],
+
+		ipa3_ctx->stats.page_recycle_stats[1].total_replenished,
+		ipa3_ctx->stats.page_recycle_stats[1].page_recycled,
+		ipa3_ctx->stats.page_recycle_stats[1].tmp_alloc,
+		ipa3_ctx->stats.num_sort_tasklet_sched[1],
+
+		ipa3_ctx->stats.page_recycle_cnt_in_tasklet,
+		ipa3_ctx->stats.num_of_times_wq_reschd);
 
 	cnt += nbytes;
 
 	for (k = 0; k < 2; k++) {
 		for (i = 0; i < ipa3_ctx->page_poll_threshold; i++) {
-			nbytes = scnprintf(dbg_buff + cnt, IPA_MAX_MSG_LEN,
+			nbytes = scnprintf(
+				dbg_buff + cnt, IPA_MAX_MSG_LEN,
 				"COMMON  : Page replenish efficiency[%d][%d]  =%llu\n",
 				k, i, ipa3_ctx->stats.page_recycle_cnt[k][i]);
 			cnt += nbytes;
@@ -1651,6 +1676,111 @@ static ssize_t ipa3_read_page_recycle_stats(struct file *file,
 
 	return simple_read_from_buffer(ubuf, count, ppos, dbg_buff, cnt);
 }
+
+static ssize_t ipa3_read_lan_coal_stats(
+	struct file *file,
+	char __user *ubuf,
+	size_t       count,
+	loff_t      *ppos)
+{
+	int nbytes=0, cnt=0;
+	u32 i;
+	char buf[1024];
+
+	*buf = '\0';
+
+	for ( i = 0;
+		  i < sizeof(ipa3_ctx->stats.coal.coal_veid) /
+			  sizeof(ipa3_ctx->stats.coal.coal_veid[0]);
+		  i++ ) {
+
+		nbytes += scnprintf(
+			buf         + nbytes,
+			sizeof(buf) - nbytes,
+			"(%u/%llu) ",
+			i,
+			ipa3_ctx->stats.coal.coal_veid[i]);
+	}
+
+	nbytes = scnprintf(
+		dbg_buff, IPA_MAX_MSG_LEN,
+		"LAN COAL rx            = %llu\n"
+		"LAN COAL pkts          = %llu\n"
+		"LAN COAL left as is    = %llu\n"
+		"LAN COAL reconstructed = %llu\n"
+		"LAN COAL hdr qmap err  = %llu\n"
+		"LAN COAL hdr nlo err   = %llu\n"
+		"LAN COAL hdr pkt err   = %llu\n"
+		"LAN COAL csum err      = %llu\n"
+
+		"LAN COAL ip invalid    = %llu\n"
+		"LAN COAL trans invalid = %llu\n"
+		"LAN COAL tcp           = %llu\n"
+		"LAN COAL tcp bytes     = %llu\n"
+		"LAN COAL udp           = %llu\n"
+		"LAN COAL udp bytes     = %llu\n"
+		"LAN COAL (veid/cnt)...(veid/cnt) = %s\n",
+
+		ipa3_ctx->stats.coal.coal_rx,
+		ipa3_ctx->stats.coal.coal_pkts,
+		ipa3_ctx->stats.coal.coal_left_as_is,
+		ipa3_ctx->stats.coal.coal_reconstructed,
+		ipa3_ctx->stats.coal.coal_hdr_qmap_err,
+		ipa3_ctx->stats.coal.coal_hdr_nlo_err,
+		ipa3_ctx->stats.coal.coal_hdr_pkt_err,
+		ipa3_ctx->stats.coal.coal_csum_err,
+		ipa3_ctx->stats.coal.coal_ip_invalid,
+		ipa3_ctx->stats.coal.coal_trans_invalid,
+		ipa3_ctx->stats.coal.coal_tcp,
+		ipa3_ctx->stats.coal.coal_tcp_bytes,
+		ipa3_ctx->stats.coal.coal_udp,
+		ipa3_ctx->stats.coal.coal_udp_bytes,
+		buf);
+
+	cnt += nbytes;
+
+	return simple_read_from_buffer(ubuf, count, ppos, dbg_buff, cnt);
+}
+
+static ssize_t ipa3_read_cache_recycle_stats(
+	struct file *file,
+	char __user *ubuf,
+	size_t       count,
+	loff_t      *ppos)
+{
+	int nbytes;
+	int cnt = 0;
+
+	nbytes = scnprintf(dbg_buff, IPA_MAX_MSG_LEN,
+			"COAL  (cache) : Total number of pkts replenished =%llu\n"
+			"COAL  (cache) : Number of pkts alloced  =%llu\n"
+			"COAL  (cache) : Number of pkts not alloced  =%llu\n"
+
+			"DEF   (cache) : Total number of pkts replenished =%llu\n"
+			"DEF   (cache) : Number of pkts alloced  =%llu\n"
+			"DEF   (cache) : Number of pkts not alloced  =%llu\n"
+
+			"OTHER (cache) : Total number of packets replenished =%llu\n"
+			"OTHER (cache) : Number of pkts alloced  =%llu\n"
+			"OTHER (cache) : Number of pkts not alloced  =%llu\n",
+
+			ipa3_ctx->stats.cache_recycle_stats[0].tot_pkt_replenished,
+			ipa3_ctx->stats.cache_recycle_stats[0].pkt_allocd,
+			ipa3_ctx->stats.cache_recycle_stats[0].pkt_found,
+
+			ipa3_ctx->stats.cache_recycle_stats[1].tot_pkt_replenished,
+			ipa3_ctx->stats.cache_recycle_stats[1].pkt_allocd,
+			ipa3_ctx->stats.cache_recycle_stats[1].pkt_found,
+
+			ipa3_ctx->stats.cache_recycle_stats[2].tot_pkt_replenished,
+			ipa3_ctx->stats.cache_recycle_stats[2].pkt_allocd,
+			ipa3_ctx->stats.cache_recycle_stats[2].pkt_found);
+
+	cnt += nbytes;
+
+	return simple_read_from_buffer(ubuf, count, ppos, dbg_buff, cnt);
+}
+
 static ssize_t ipa3_read_wstats(struct file *file, char __user *ubuf,
 		size_t count, loff_t *ppos)
 {
@@ -1670,7 +1800,7 @@ static ssize_t ipa3_read_wstats(struct file *file, char __user *ubuf,
 			HEAD_FRMT_STR, "Client IPA_CLIENT_WLAN1_PROD Stats:");
 		cnt += nbytes;
 
-		ipa_ep_idx = ipa3_get_ep_mapping(client);
+		ipa_ep_idx = ipa_get_ep_mapping(client);
 		if (ipa_ep_idx == -1) {
 			nbytes = scnprintf(dbg_buff + cnt,
 				IPA_MAX_MSG_LEN - cnt, HEAD_FRMT_STR, "Not up");
@@ -1728,7 +1858,7 @@ static ssize_t ipa3_read_wstats(struct file *file, char __user *ubuf,
 		"Client IPA_CLIENT_WLAN1_CONS Stats:");
 	cnt += nbytes;
 	while (1) {
-		ipa_ep_idx = ipa3_get_ep_mapping(client);
+		ipa_ep_idx = ipa_get_ep_mapping(client);
 		if (ipa_ep_idx == -1) {
 			nbytes = scnprintf(dbg_buff + cnt,
 				IPA_MAX_MSG_LEN - cnt, HEAD_FRMT_STR, "Not up");
@@ -1921,7 +2051,7 @@ static ssize_t ipa3_read_wdi(struct file *file, char __user *ubuf,
 	int cnt = 0;
 	struct IpaHwStatsWDITxInfoData_t *tx_ch_ptr;
 
-	if (!ipa3_get_wdi_stats(&stats)) {
+	if (!ipa_get_wdi_stats(&stats)) {
 		tx_ch_ptr = &stats.tx_ch_stats;
 		nbytes = scnprintf(dbg_buff, IPA_MAX_MSG_LEN,
 			"TX num_pkts_processed=%u\n"
@@ -2416,7 +2546,7 @@ static ssize_t ipa3_read_nat4(
 
 	bool any_table_active = (nm_ptr->ddr_in_use || nm_ptr->sram_in_use);
 
-	pr_err("IPA3 NAT stats\n");
+	pr_err("==== NAT Tables Start ====\n");
 
 	if (!dev->is_dev_init) {
 		pr_err("NAT hasn't been initialized or not supported\n");
@@ -2503,6 +2633,7 @@ static ssize_t ipa3_read_nat4(
 	}
 
 bail:
+	pr_err("==== NAT Tables End ====\n");
 	mutex_unlock(&dev->lock);
 
 ret:
@@ -2662,94 +2793,42 @@ static ssize_t ipa3_read_wdi3_gsi_stats(struct file *file,
 		goto done;
 	}
 	if (!ipa3_get_wdi3_gsi_stats(&stats)) {
-		if (ipa3_ctx->is_dual_pine_config) {
-			nbytes = scnprintf(dbg_buff, IPA_MAX_MSG_LEN,
-				"Pine_5G/6G TX ringFull=%u\n"
-				"Pine_5G/6G TX ringEmpty=%u\n"
-				"Pine_5G/6G TX ringUsageHigh=%u\n"
-				"Pine_5G/6G TX ringUsageLow=%u\n"
-				"Pine_5G/6G TX RingUtilCount=%u\n",
-				stats.u.ring[1].ringFull,
-				stats.u.ring[1].ringEmpty,
-				stats.u.ring[1].ringUsageHigh,
-				stats.u.ring[1].ringUsageLow,
-				stats.u.ring[1].RingUtilCount);
-				cnt += nbytes;
-				nbytes = scnprintf(dbg_buff + cnt, IPA_MAX_MSG_LEN - cnt,
-				"Pine_2G TX ringFull=%u\n"
-				"Pine_2G TX ringEmpty=%u\n"
-				"Pine_2G TX ringUsageHigh=%u\n"
-				"Pine_2G TX ringUsageLow=%u\n"
-				"Pine_2G TX RingUtilCount=%u\n",
-				stats.u.ring[2].ringFull,
-				stats.u.ring[2].ringEmpty,
-				stats.u.ring[2].ringUsageHigh,
-				stats.u.ring[2].ringUsageLow,
-				stats.u.ring[2].RingUtilCount);
-			cnt += nbytes;
-			nbytes = scnprintf(dbg_buff + cnt, IPA_MAX_MSG_LEN - cnt,
-				"Pine_5G/6G RX ringFull=%u\n"
-				"Pine_5G/6G RX ringEmpty=%u\n"
-				"Pine_5G/6G RX ringUsageHigh=%u\n"
-				"Pine_5G/6G RX ringUsageLow=%u\n"
-				"Pine_5G/6G RX RingUtilCount=%u\n",
-				stats.u.ring[0].ringFull,
-				stats.u.ring[0].ringEmpty,
-				stats.u.ring[0].ringUsageHigh,
-				stats.u.ring[0].ringUsageLow,
-				stats.u.ring[0].RingUtilCount);
-			cnt += nbytes;
-			nbytes = scnprintf(dbg_buff + cnt, IPA_MAX_MSG_LEN - cnt,
-				"Pine_2G RX ringFull=%u\n"
-				"Pine_2G RX ringEmpty=%u\n"
-				"Pine_2G RX ringUsageHigh=%u\n"
-				"Pine_2G RX ringUsageLow=%u\n"
-				"Pine_2G RX RingUtilCount=%u\n",
-				stats.u.ring[3].ringFull,
-				stats.u.ring[3].ringEmpty,
-				stats.u.ring[3].ringUsageHigh,
-				stats.u.ring[3].ringUsageLow,
-				stats.u.ring[3].RingUtilCount);
-			cnt += nbytes;
-		}
-		else {
-			nbytes = scnprintf(dbg_buff, IPA_MAX_MSG_LEN,
-				"TX ringFull=%u\n"
-				"TX ringEmpty=%u\n"
-				"TX ringUsageHigh=%u\n"
-				"TX ringUsageLow=%u\n"
-				"TX RingUtilCount=%u\n",
-				stats.u.ring[1].ringFull,
-				stats.u.ring[1].ringEmpty,
-				stats.u.ring[1].ringUsageHigh,
-				stats.u.ring[1].ringUsageLow,
-				stats.u.ring[1].RingUtilCount);
-			cnt += nbytes;
-			nbytes = scnprintf(dbg_buff + cnt, IPA_MAX_MSG_LEN - cnt,
-				"TX1 ringFull=%u\n"
-				"TX1 ringEmpty=%u\n"
-				"TX1 ringUsageHigh=%u\n"
-				"TX1 ringUsageLow=%u\n"
-				"TX1 RingUtilCount=%u\n",
-				stats.u.ring[2].ringFull,
-				stats.u.ring[2].ringEmpty,
-				stats.u.ring[2].ringUsageHigh,
-				stats.u.ring[2].ringUsageLow,
-				stats.u.ring[2].RingUtilCount);
-			cnt += nbytes;
-			nbytes = scnprintf(dbg_buff + cnt, IPA_MAX_MSG_LEN - cnt,
-				"RX ringFull=%u\n"
-				"RX ringEmpty=%u\n"
-				"RX ringUsageHigh=%u\n"
-				"RX ringUsageLow=%u\n"
-				"RX RingUtilCount=%u\n",
-				stats.u.ring[0].ringFull,
-				stats.u.ring[0].ringEmpty,
-				stats.u.ring[0].ringUsageHigh,
-				stats.u.ring[0].ringUsageLow,
-				stats.u.ring[0].RingUtilCount);
-			cnt += nbytes;
-		}
+		nbytes = scnprintf(dbg_buff, IPA_MAX_MSG_LEN,
+			"TX ringFull=%u\n"
+			"TX ringEmpty=%u\n"
+			"TX ringUsageHigh=%u\n"
+			"TX ringUsageLow=%u\n"
+			"TX RingUtilCount=%u\n",
+			stats.u.ring[1].ringFull,
+			stats.u.ring[1].ringEmpty,
+			stats.u.ring[1].ringUsageHigh,
+			stats.u.ring[1].ringUsageLow,
+			stats.u.ring[1].RingUtilCount);
+		cnt += nbytes;
+		nbytes = scnprintf(dbg_buff + cnt, IPA_MAX_MSG_LEN - cnt,
+			"TX1 ringFull=%u\n"
+			"TX1 ringEmpty=%u\n"
+			"TX1 ringUsageHigh=%u\n"
+			"TX1 ringUsageLow=%u\n"
+			"TX1 RingUtilCount=%u\n",
+			stats.u.ring[2].ringFull,
+			stats.u.ring[2].ringEmpty,
+			stats.u.ring[2].ringUsageHigh,
+			stats.u.ring[2].ringUsageLow,
+			stats.u.ring[2].RingUtilCount);
+		cnt += nbytes;
+		nbytes = scnprintf(dbg_buff + cnt, IPA_MAX_MSG_LEN - cnt,
+			"RX ringFull=%u\n"
+			"RX ringEmpty=%u\n"
+			"RX ringUsageHigh=%u\n"
+			"RX ringUsageLow=%u\n"
+			"RX RingUtilCount=%u\n",
+			stats.u.ring[0].ringFull,
+			stats.u.ring[0].ringEmpty,
+			stats.u.ring[0].ringUsageHigh,
+			stats.u.ring[0].ringUsageLow,
+			stats.u.ring[0].RingUtilCount);
+		cnt += nbytes;
 	} else {
 		nbytes = scnprintf(dbg_buff, IPA_MAX_MSG_LEN,
 				"Fail to read WDI GSI stats\n");
@@ -2991,6 +3070,7 @@ static void ipa_dump_status(struct ipahal_pkt_status *status)
 	IPA_DUMP_STATUS_FIELD(hdr_offset);
 	IPA_DUMP_STATUS_FIELD(frag_hit);
 	IPA_DUMP_STATUS_FIELD(frag_rule);
+	IPA_DUMP_STATUS_FIELD(ttl_dec);
 }
 
 static ssize_t ipa_status_stats_read(struct file *file, char __user *ubuf,
@@ -3239,7 +3319,224 @@ static ssize_t ipa3_write_nat_table_move(struct file *file,
 
 	return count;
 }
+#if defined(CONFIG_IPA_TSP)
+static ssize_t ipa3_read_tsp(struct file *file, char __user *buf, size_t count, loff_t *ppos)
+{
+	int i, nbytes = 0;
+	struct ipahal_ipa_state_tsp state_tsp;
+	u32 qm_non_empty;
+	struct ipa_ioc_tsp_ingress_class_params ingr_tc;
+	struct ipa_ioc_tsp_egress_prod_params egr_ep;
+	struct ipa_ioc_tsp_egress_class_params egr_tc;
 
+	/* Print the global TSP state flags */
+	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
+	ipahal_read_reg_fields(IPA_STATE_TSP, &state_tsp);
+	ipahal_read_reg_fields(IPA_STATE_QMNGR_QUEUE_NONEMPTY, &qm_non_empty);
+	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
+
+	if (state_tsp.traffic_shaper_idle)
+		nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"Traffic-Sahper module IDLE\n");
+	if (state_tsp.traffic_shaper_fifo_empty)
+		nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"Traffic-Sahper FIFO empty\n");
+	if (state_tsp.queue_mngr_idle)
+		nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"QMNGR overall IDLE\n");
+	if (state_tsp.queue_mngr_head_idle)
+		nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"QMNGR head module IDLE\n");
+	if (state_tsp.queue_mngr_shared_idle)
+		nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"QMNGR shared module IDLE\n");
+	if (state_tsp.queue_mngr_tail_idle)
+		nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"QMNGR tail module IDLE\n");
+	if (state_tsp.queue_mngr_block_ctrl_idle)
+		nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"Block control module IDLE\n");
+
+	nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"QM non-empty bitmask: 0x%08X\n", qm_non_empty);
+
+	/* Dump Ingress Class, Egress Producer and Egress Class tables */
+	nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"Ingress Trafic Class Table:\n");
+	nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"TC Index\tMax Rate\tMax Burst\tInclude L2\n");
+	for (i = 1; i <= ipa3_ctx->tsp.ingr_tc_max; i++) {
+		ipahal_tsp_parse_hw_ingr_tc(ipa3_ctx->tsp.ingr_tc_tbl.base, i, &ingr_tc);
+		nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"%02d:\t\t%u\t\t%u\t\t%u\n",
+			i, ingr_tc.max_rate, ingr_tc.max_burst, ingr_tc.include_l2_len);
+	}
+
+	nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"Egress Producer Table:\n");
+	nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"EP Index\tClient\tMax Rate\tMax Burst\n");
+	for (i = 0; i < ipa3_ctx->tsp.egr_ep_max; i++) {
+		ipahal_tsp_parse_hw_egr_ep(ipa3_ctx->tsp.egr_ep_tbl.base, i, &egr_ep);
+		nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"%d:\t\t%d\t%u\t\t%u\n",
+			i, ipa3_ctx->tsp.egr_ep_config[i], egr_ep.max_rate, egr_ep.max_burst);
+	}
+
+	nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"Egress Trafic Class Table:\n");
+	nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"TC Index\tMax Rate\tMax Burst\tG. Rate\tG. Burst\n");
+	for (i = 1; i <= ipa3_ctx->tsp.egr_tc_max; i++) {
+		ipahal_tsp_parse_hw_egr_tc(ipa3_ctx->tsp.egr_tc_tbl.base, i, &egr_tc);
+		nbytes += scnprintf(dbg_buff + nbytes, IPA_MAX_MSG_LEN - nbytes,
+			"%02d:\t\t%u\t\t%u\t\t%u\t%u\n",
+			i, egr_tc.max_rate, egr_tc.max_burst,
+			egr_tc.guaranteed_rate, egr_tc.guaranteed_burst);
+	}
+
+	return simple_read_from_buffer(buf, count, ppos, dbg_buff, nbytes);
+}
+
+static ssize_t ipa3_write_tsp(struct file *file, const char __user *buf,
+			      size_t count, loff_t *ppos) {
+	int ret;
+	u8 option = 0;
+
+	if (count >= sizeof(dbg_buff))
+		return -EFAULT;
+
+	ret = kstrtou8_from_user(buf, count, 0, &option);
+	if(ret)
+		return ret;
+
+	pr_err("TSP write is not implemented.\n");
+
+	return count;
+}
+#endif
+
+static ssize_t ipa3_perform_loopback(struct file *file, char __user *ubuf,
+		size_t count, loff_t *ppos)
+{
+	struct ipa_ioc_add_rt_rule *rt_rule;
+	struct ipa_ioc_add_flt_rule *flt_rule;
+	struct ipa_ioc_get_rt_tbl rt_lookup;
+	int idx;
+	u32 rt4_wan_cons;
+	u32 rt6_wan_cons;
+	struct ipahal_reg_ep_cfg_status ep_status = { 0 };
+
+	IPAERR("Adding rules to perform loopback on IPA\n");
+
+	/* set this flag to false so flt rule dont get skipped for WAN_PROD */
+	ipa3_ctx->modem_cfg_emb_pipe_flt = false;
+
+	idx = ipa_get_ep_mapping(IPA_CLIENT_APPS_WAN_PROD);
+	if (idx == IPA_EP_NOT_ALLOCATED) {
+		IPAERR("failed to get idx");
+		return idx;
+	}
+
+	ipa3_ctx->ep[idx].cfg.hdr.hdr_ofst_metadata = 1;
+	ipa3_cfg_ep_hdr(idx, &ipa3_ctx->ep[idx].cfg.hdr);
+
+	ipa3_cfg_ep_status(idx, &ep_status);
+
+	rt_rule = kzalloc(sizeof(*rt_rule) + 1 * sizeof(struct ipa_rt_rule_add),
+		GFP_KERNEL);
+	if (!rt_rule) {
+		IPAERR("no mem\n");
+		return 0;
+	}
+
+	flt_rule = kzalloc(sizeof(*flt_rule) +
+		1 * sizeof(struct ipa_flt_rule_add), GFP_KERNEL);
+	if (!flt_rule) {
+		IPAERR("no mem\n");
+		goto free_rt;
+	}
+
+	rt_rule->commit = 1;
+	rt_rule->ip = IPA_IP_v4;
+	rt_lookup.ip = rt_rule->ip;
+	strscpy(rt_rule->rt_tbl_name, "V4_RT_TO_APPS_WAN_CONS",
+		IPA_RESOURCE_NAME_MAX);
+	strscpy(rt_lookup.name, rt_rule->rt_tbl_name, IPA_RESOURCE_NAME_MAX);
+	rt_rule->num_rules = 1;
+	rt_rule->rules[0].rule.dst = IPA_CLIENT_APPS_WAN_CONS;
+	rt_rule->rules[0].rule.hashable = true;
+	#ifdef IPA_RT_SUPPORT_COAL
+		rt_rule->rules[0].rule.coalesce = true;
+	#endif
+	if (ipa_add_rt_rule(rt_rule) || rt_rule->rules[0].status) {
+		IPAERR("failed to install V4 rules\n");
+		goto free_flt;
+	}
+	if (ipa3_get_rt_tbl(&rt_lookup)) {
+		IPAERR("failed to query V4 rules\n");
+		goto free_flt;
+	}
+	rt4_wan_cons = rt_lookup.hdl;
+
+	memset(rt_rule, 0, sizeof(*rt_rule));
+	rt_rule->commit = 1;
+	rt_rule->ip = IPA_IP_v6;
+	rt_lookup.ip = rt_rule->ip;
+	strscpy(rt_rule->rt_tbl_name, "V6_RT_TO_APPS_WAN_CONS",
+		IPA_RESOURCE_NAME_MAX);
+	strscpy(rt_lookup.name, rt_rule->rt_tbl_name, IPA_RESOURCE_NAME_MAX);
+	rt_rule->num_rules = 1;
+	rt_rule->rules[0].rule.dst = IPA_CLIENT_APPS_WAN_CONS;
+	rt_rule->rules[0].rule.hashable = true;
+	#ifdef IPA_RT_SUPPORT_COAL
+		rt_rule->rules[0].rule.coalesce = true;
+	#endif
+	if (ipa_add_rt_rule(rt_rule) || rt_rule->rules[0].status) {
+		IPAERR("failed to install V6 rules\n");
+		goto free_flt;
+	}
+	if (ipa3_get_rt_tbl(&rt_lookup)) {
+		IPAERR("failed to query V6 rules\n");
+		goto free_flt;
+	}
+	rt6_wan_cons = rt_lookup.hdl;
+
+	memset(flt_rule, 0, sizeof(*flt_rule));
+	flt_rule->commit = 1;
+	flt_rule->ip = IPA_IP_v4;
+	flt_rule->ep = IPA_CLIENT_APPS_WAN_PROD;
+	flt_rule->num_rules = 1;
+	flt_rule->rules[0].at_rear = 1;
+	flt_rule->rules[0].rule.action = IPA_PASS_TO_ROUTING;
+	flt_rule->rules[0].rule.rt_tbl_hdl = rt4_wan_cons;
+	flt_rule->rules[0].rule.hashable = 1;
+	if (ipa3_add_flt_rule(flt_rule) || flt_rule->rules[0].status) {
+		IPAERR("failed to install V4 rules\n");
+		goto free_flt;
+	}
+
+	memset(flt_rule, 0, sizeof(*flt_rule));
+	flt_rule->commit = 1;
+	flt_rule->ip = IPA_IP_v6;
+	flt_rule->ep = IPA_CLIENT_APPS_WAN_PROD;
+	flt_rule->num_rules = 1;
+	flt_rule->rules[0].at_rear = 1;
+	flt_rule->rules[0].rule.action = IPA_PASS_TO_ROUTING;
+	flt_rule->rules[0].rule.rt_tbl_hdl = rt6_wan_cons;
+	flt_rule->rules[0].rule.hashable = 1;
+	if (ipa3_add_flt_rule(flt_rule) || flt_rule->rules[0].status) {
+		IPAERR("failed to install V6 rules\n");
+		goto free_flt;
+	}
+
+
+free_flt:
+	kfree(flt_rule);
+free_rt:
+	kfree(rt_rule);
+	return 0;
+}
 
 static const struct ipa3_debugfs_file debugfs_files[] = {
 	{
@@ -3366,6 +3663,14 @@ static const struct ipa3_debugfs_file debugfs_files[] = {
 			.read = ipa3_read_page_recycle_stats,
 		}
 	}, {
+		"lan_coal_stats", IPA_READ_ONLY_MODE, NULL, {
+			.read = ipa3_read_lan_coal_stats,
+		}
+	}, {
+		"cache_recycle_stats", IPA_READ_ONLY_MODE, NULL, {
+			.read = ipa3_read_cache_recycle_stats,
+		}
+	}, {
 		"wdi", IPA_READ_ONLY_MODE, NULL, {
 			.read = ipa3_read_wdi,
 		}
@@ -3457,7 +3762,18 @@ static const struct ipa3_debugfs_file debugfs_files[] = {
 			.read = ipa3_read_ipa_max_napi_sort_page_thrshld,
 			.write = ipa3_write_ipa_max_napi_sort_page_thrshld,
 		}
-	},
+#if defined(CONFIG_IPA_TSP)
+	}, {
+		"tsp", IPA_READ_WRITE_MODE, NULL, {
+			.read = ipa3_read_tsp,
+			.write = ipa3_write_tsp,
+		}
+#endif
+	},	{
+		"ipa_loopback_on_ipa", IPA_READ_ONLY_MODE, NULL, {
+			.read = ipa3_perform_loopback,
+		}
+	}
 };
 
 void ipa3_debugfs_init(void)
@@ -3853,11 +4169,14 @@ static ssize_t ipa3_eth_read_err_status(struct file *file,
 
 	switch (client->client_type) {
 	case IPA_ETH_CLIENT_AQC107:
+		fallthrough;
 	case IPA_ETH_CLIENT_AQC113:
 		tx_ep = IPA_CLIENT_AQC_ETHERNET_CONS;
 		rx_ep = IPA_CLIENT_AQC_ETHERNET_PROD;
 		scratch_num = 7;
+		fallthrough;
 	case IPA_ETH_CLIENT_RTK8111K:
+		fallthrough;
 	case IPA_ETH_CLIENT_RTK8125B:
 		tx_ep = IPA_CLIENT_RTK_ETHERNET_CONS;
 		rx_ep = IPA_CLIENT_RTK_ETHERNET_PROD;
@@ -3883,6 +4202,7 @@ static ssize_t ipa3_eth_read_err_status(struct file *file,
 		__ipa_ntn3_client_stats_read(&cnt, &ntn3_stats, str_client_tx, str_client_rx);
 		goto done;
 #endif
+		fallthrough;
 	default:
 		IPAERR("Not supported\n");
 		return 0;
@@ -3981,5 +4301,5 @@ int _ipa_read_ep_reg_v4_0(char *buf, int max_len, int pipe)
 	return INVALID_NO_OF_CHAR;
 }
 void ipa3_eth_debugfs_init(void) {}
-void ipa3_eth_debugfs_add_node(struct ipa_eth_client *client) {}
+void ipa3_eth_debugfs_add(struct ipa_eth_client *client) {}
 #endif

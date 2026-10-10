@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ *
+ * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef GSI_H
@@ -37,6 +38,7 @@
 
 #define GSI_INST_RAM_FW_VER_OFFSET                      (0)
 #define GSI_INST_RAM_FW_VER_GSI_3_0_OFFSET      (64)
+#define GSI_INST_RAM_FW_VER_GSI_5_5_OFFSET      (66)
 #define GSI_INST_RAM_FW_VER_HW_MASK                     (0xFC00)
 #define GSI_INST_RAM_FW_VER_HW_SHIFT            (10)
 #define GSI_INST_RAM_FW_VER_FLAVOR_MASK         (0x380)
@@ -85,6 +87,18 @@
 		} \
 	} while (0)
 
+#define GSIERR_RL(fmt, args...) \
+	do { \
+		dev_err_ratelimited(gsi_ctx->dev, "%s:%d " fmt, __func__, __LINE__, \
+		## args);\
+		if (gsi_ctx) { \
+			GSI_IPC_LOGGING(gsi_ctx->ipc_logbuf, \
+				"%s:%d " fmt, ## args); \
+			GSI_IPC_LOGGING(gsi_ctx->ipc_logbuf_low, \
+				"%s:%d " fmt, ## args); \
+		} \
+	} while (0)
+
 #define GSI_IPC_LOG_PAGES 50
 #define GSI_MAX_NUM_MSI 2
 
@@ -101,6 +115,8 @@ enum gsi_ver {
 	GSI_VER_2_11 = 9,
 	GSI_VER_3_0 = 10,
 	GSI_VER_5_2 = 11,
+	GSI_VER_5_5 = 12,
+	GSI_VER_6_0 = 13,
 	GSI_VER_MAX,
 };
 
@@ -160,7 +176,7 @@ enum gsi_evt_chtype {
 	GSI_EVT_CHTYPE_11AD_EV = 0x9,
 	GSI_EVT_CHTYPE_RTK_EV = 0xC,
 	GSI_EVT_CHTYPE_NTN_EV = 0xD,
-	GSI_EVT_CHTYPE_WDI3M_EV = 0xE,
+	GSI_EVT_CHTYPE_WDI3_V2_EV = 0XF,
 };
 
 enum gsi_evt_ring_elem_size {
@@ -250,7 +266,7 @@ enum gsi_chan_prot {
 	GSI_CHAN_PROT_QDSS = 0xB,
 	GSI_CHAN_PROT_RTK = 0xC,
 	GSI_CHAN_PROT_NTN = 0xD,
-	GSI_CHAN_PROT_WDI3M = 0xE,
+	GSI_CHAN_PROT_WDI3_V2 = 0XF,
 };
 
 enum gsi_max_prefetch {
@@ -338,6 +354,8 @@ struct gsi_per_props {
 	void *user_data;
 	int (*clk_status_cb)(void);
 	void (*enable_clk_bug_on)(void);
+	void (*vote_clk_cb)(void);
+	void (*unvote_clk_cb)(void);
 	bool skip_ieob_mask_wa;
 	bool tx_poll;
 };
@@ -357,17 +375,41 @@ enum gsi_chan_evt {
 /**
  * gsi_chan_xfer_veid - Virtual Channel ID
  *
- * @GSI_VEID_0: transfer completed for VEID 0
- * @GSI_VEID_1: transfer completed for VEID 1
- * @GSI_VEID_2: transfer completed for VEID 2
- * @GSI_VEID_3: transfer completed for VEID 3
+ * @GSI_VEID_0:  transfer completed for VEID 0
+ * @GSI_VEID_1:  transfer completed for VEID 1
+ * @GSI_VEID_2:  transfer completed for VEID 2
+ * @GSI_VEID_3:  transfer completed for VEID 3
+ * @GSI_VEID_4:  transfer completed for VEID 4
+ * @GSI_VEID_5:  transfer completed for VEID 5
+ * @GSI_VEID_6:  transfer completed for VEID 6
+ * @GSI_VEID_7:  transfer completed for VEID 7
+ * @GSI_VEID_8:  transfer completed for VEID 8
+ * @GSI_VEID_9:  transfer completed for VEID 9
+ * @GSI_VEID_10: transfer completed for VEID 10
+ * @GSI_VEID_11: transfer completed for VEID 11
+ * @GSI_VEID_12: transfer completed for VEID 12
+ * @GSI_VEID_13: transfer completed for VEID 13
+ * @GSI_VEID_14: transfer completed for VEID 14
+ * @GSI_VEID_15: transfer completed for VEID 15
  * @GSI_VEID_DEFAULT: used when veid is invalid
  */
 enum gsi_chan_xfer_veid {
-	GSI_VEID_0 = 0,
-	GSI_VEID_1 = 1,
-	GSI_VEID_2 = 2,
-	GSI_VEID_3 = 3,
+	GSI_VEID_0  =  0,
+	GSI_VEID_1  =  1,
+	GSI_VEID_2  =  2,
+	GSI_VEID_3  =  3,
+	GSI_VEID_4  =  4,
+	GSI_VEID_5  =  5,
+	GSI_VEID_6  =  6,
+	GSI_VEID_7  =  7,
+	GSI_VEID_8  =  8,
+	GSI_VEID_9  =  9,
+	GSI_VEID_10 = 10,
+	GSI_VEID_11 = 11,
+	GSI_VEID_12 = 12,
+	GSI_VEID_13 = 13,
+	GSI_VEID_14 = 14,
+	GSI_VEID_15 = 15,
 	GSI_VEID_DEFAULT,
 	GSI_VEID_MAX
 };
@@ -661,23 +703,20 @@ struct __packed gsi_mhi_channel_scratch {
  * @oob_mod_threshold:   Defines OOB moderation threshold. Units are in 8
  *                       ring elements.
  *                       should not ring DBs until notified of DB mode/OOB mode
- * @min_available_elements: Minimum number of available credits used for MHIC
- * 						 channels. No of coalescing context+1.
  */
 struct __packed gsi_mhi_channel_scratch_v2 {
-    uint32_t mhi_host_wp_addr_lo; /* scratch 1 = 32 bits */
+    uint32_t mhi_host_wp_addr_lo;
     uint32_t mhi_host_wp_addr_hi : 9;
     uint32_t polling_configuration : 5;
-    uint32_t rsvd1 : 18; /* end of scratch 2 */
+    uint32_t rsvd1 : 18;
     uint32_t rsvd2 : 1;
     uint32_t assert_bit40 : 1;
     uint32_t resvd3 : 5;
     uint32_t burst_mode_enabled : 1;
     uint32_t polling_mode : 1;
     uint32_t oob_mod_threshold : 5;
-    uint32_t min_available_elements : 4;
-    uint32_t resvd4 : 14; /* end of scratch 3 */
-    uint32_t resvd5; /* Scratch 4 Not configured by AP */
+    uint32_t resvd4 : 18; /* Not configured by AP */
+    uint32_t resvd5; /* Not configured by AP */
 };
 
 /**
@@ -919,6 +958,35 @@ struct __packed gsi_11ad_tx_channel_scratch {
 	uint32_t fixed_data_buffer_size_pow_2:16;
 	uint32_t resv2:8;
 };
+/**
+ * gsi_wdi3_hamilton_channel_scratch - WDI 3 protocol, hamilton chipset
+ * SW config area of channel scratch
+ *
+ * @wifi_rx_ri_addr_low: Low 32 bits of Transfer ring Read Index address.
+ * @wifi_rx_ri_addr_high: High 32 bits of Transer ring Read Index address.
+ * @update_ri_moderation_threshold: Threshold N for Transfer ring Read Index
+				    N is the number of packets that IPA will
+				    process before wifi transfer ring Ri will
+				    be updated.
+ * @endp_metadata_reg_offset: Rx only, the offset of IPA_ENDP_INIT_HDR_METADATA_n
+			      of the corresponding endpoint in 4B words from IPA
+			      base address.
+ * @qmap_id: Rx only, used for setting metadata register in IPA, Read only field
+	     for MCS, Write for SW
+ */
+
+struct __packed gsi_wdi3_v2_channel_scratch {
+	uint32_t wifi_rp_address_low;
+	uint32_t wifi_rp_address_high;
+	uint32_t update_rp_moderation_threshold : 5;
+	uint32_t qmap_id : 8;
+	uint32_t reserved1 : 3;
+	uint32_t endp_metadata_reg_offset : 16;
+	uint32_t rx_pkt_offset : 16;
+	uint32_t reserved2 : 6;
+	uint32_t bank_id : 6;
+	uint32_t reserved3: 4;
+};
 
 /**
  * gsi_wdi3_channel_scratch - WDI protocol 3 SW config area of
@@ -1090,6 +1158,7 @@ union __packed gsi_channel_scratch {
 	struct __packed gsi_11ad_rx_channel_scratch rx_11ad;
 	struct __packed gsi_11ad_tx_channel_scratch tx_11ad;
 	struct __packed gsi_wdi3_channel_scratch wdi3;
+	struct __packed gsi_wdi3_v2_channel_scratch wdi3_v2;
 	struct __packed gsi_mhip_channel_scratch mhip;
 	struct __packed gsi_wdi2_channel_scratch_new wdi2_new;
 	struct __packed gsi_aqc_channel_scratch aqc;
@@ -1814,6 +1883,14 @@ void gsi_ring_evt_doorbell_polling_mode(unsigned long chan_hdl);
 int gsi_config_channel_mode(unsigned long chan_hdl, enum gsi_chan_mode mode);
 
 /**
+ * gsi_status_enabled() - Query GSI Status
+ *
+ * Returns:	true if ENABLED, false on DISABLED
+ *
+ */
+bool gsi_status_enabled(void);
+
+/**
  * gsi_queue_xfer - Peripheral should call this function
  * to queue transfers on the given channel
  *
@@ -2158,6 +2235,20 @@ int gsi_query_channel_info(unsigned long chan_hdl,
  * @Return gsi_status
  */
 int gsi_is_channel_empty(unsigned long chan_hdl, bool *is_empty);
+
+/**
+ * gsi_is_teth_channel_empty - Teth client can call this function to query if
+ * the channel is empty. This is only applicable to GPI. "Empty" means
+ * GSI has consumed all descriptors for a TO_GSI channel and SW has
+ * processed all completed descriptors for a FROM_GSI channel.
+ *
+ * @chan_hdl:  Client handle previously obtained from gsi_alloc_channel
+ * @is_empty:  set by GSI based on channel emptiness
+ *
+ * @Return gsi_status
+ */
+int gsi_is_teth_channel_empty(unsigned long chan_hdl, bool *is_empty);
+
 
 /**
  * gsi_is_event_pending - Returns true if there is at least one event in the
@@ -2509,5 +2600,7 @@ uint32_t gsi_get_evt_ring_len(int evt_hdl);
 int gsi_get_peripheral_ee(void);
 
 uint32_t gsi_get_chan_stop_stm(int chan_id, int ee);
+
+uint32_t gsi_get_outstanding_buffers(int ep_idx);
 
 #endif

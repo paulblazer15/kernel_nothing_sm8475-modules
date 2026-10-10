@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
+ *
+ * Copyright (c) 2024-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include "ipa_i.h"
 #include <linux/if_ether.h>
 #include <linux/log2.h>
 #include <linux/debugfs.h>
-#include <linux/ipa_wigig.h>
+#include "ipa_wigig.h"
 
 #define IPA_WIGIG_DESC_RING_EL_SIZE	32
 #define IPA_WIGIG_STATUS_RING_EL_SIZE	16
@@ -82,6 +84,17 @@ int ipa3_wigig_init_i(void)
 	IPADBG("\n");
 
 	ipa3_uc_register_ready_cb(&uc_loaded_notifier);
+
+	IPADBG("exit\n");
+
+	return 0;
+}
+
+int ipa3_wigig_deinit_i(void)
+{
+	IPADBG("\n");
+
+	ipa3_uc_unregister_ready_cb(&uc_loaded_notifier);
 
 	IPADBG("exit\n");
 
@@ -888,13 +901,13 @@ static int ipa3_wigig_config_uc(bool init,
 			(struct IpaHwOffloadSetUpCmdData_t_v4_0 *)cmd.base;
 
 		cmd_data->protocol = IPA_HW_PROTOCOL_11ad;
-		cmd_data->SetupCh_params.W11AdSetupCh_params.dir =
+		cmd_data->SetupCh_params.w11ad_params.dir =
 			Rx ? W11AD_RX : W11AD_TX;
-		cmd_data->SetupCh_params.W11AdSetupCh_params.gsi_ch = gsi_ch;
-		cmd_data->SetupCh_params.W11AdSetupCh_params.wifi_ch = wifi_ch;
-		cmd_data->SetupCh_params.W11AdSetupCh_params.wifi_hp_addr_msb =
+		cmd_data->SetupCh_params.w11ad_params.gsi_ch = gsi_ch;
+		cmd_data->SetupCh_params.w11ad_params.wifi_ch = wifi_ch;
+		cmd_data->SetupCh_params.w11ad_params.wifi_hp_addr_msb =
 			IPA_WIGIG_MSB(HWHEAD);
-		cmd_data->SetupCh_params.W11AdSetupCh_params.wifi_hp_addr_lsb =
+		cmd_data->SetupCh_params.w11ad_params.wifi_hp_addr_lsb =
 			IPA_WIGIG_LSB(HWHEAD);
 		command = IPA_CPU_2_HW_CMD_OFFLOAD_CHANNEL_SET_UP;
 
@@ -913,8 +926,8 @@ static int ipa3_wigig_config_uc(bool init,
 			(struct IpaHwOffloadCommonChCmdData_t_v4_0 *)cmd.base;
 
 		cmd_data->protocol = IPA_HW_PROTOCOL_11ad;
-		cmd_data->CommonCh_params.W11AdCommonCh_params.gsi_ch = gsi_ch;
-		command = IPA_CPU_2_HW_CMD_OFFLOAD_TEAR_DOWN;
+		cmd_data->CommonCh_params.w11ad_params.gsi_ch = gsi_ch;
+		command = IPA_CPU_2_HW_CMD_OFFLOAD_CHANNEL_TEAR_DOWN;
 	}
 
 	IPA_ACTIVE_CLIENTS_INC_SIMPLE();
@@ -977,7 +990,7 @@ int ipa3_conn_wigig_rx_pipe_i(void *in, struct ipa_wigig_conn_out_params *out,
 		return -EFAULT;
 	}
 
-	ep_gsi = ipa3_get_gsi_ep_info(rx_client);
+	ep_gsi = ipa_get_gsi_ep_info(rx_client);
 	if (!ep_gsi) {
 		IPAERR("Failed getting GSI EP info for client=%d\n",
 			rx_client);
@@ -1271,7 +1284,7 @@ int ipa3_conn_wigig_client_i(void *in,
 		return -EFAULT;
 	}
 
-	ep_gsi = ipa3_get_gsi_ep_info(tx_client);
+	ep_gsi = ipa_get_gsi_ep_info(tx_client);
 	if (!ep_gsi) {
 		IPAERR("Failed getting GSI EP info for client=%d\n",
 			tx_client);
@@ -1405,7 +1418,7 @@ int ipa3_disconn_wigig_pipe_i(enum ipa_client_type client,
 		return -EFAULT;
 	}
 
-	ep_gsi = ipa3_get_gsi_ep_info(client);
+	ep_gsi = ipa_get_gsi_ep_info(client);
 	if (!ep_gsi) {
 		IPAERR("Failed getting GSI EP info for client=%d\n",
 			client);
@@ -1687,7 +1700,7 @@ int ipa3_enable_wigig_pipe_i(enum ipa_client_type client)
 		goto fail_enable_datapath;
 
 	memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
-	ipa3_cfg_ep_ctrl(ipa_ep_idx, &ep_cfg_ctrl);
+	ipa_cfg_ep_ctrl(ipa_ep_idx, &ep_cfg_ctrl);
 
 	/* ring the event db (outside the ring boundary)*/
 	val = ep->gsi_mem_info.evt_ring_base_addr +
@@ -1715,7 +1728,7 @@ int ipa3_enable_wigig_pipe_i(enum ipa_client_type client)
 						HOLB_MONITOR_MASK, holb_max_cnt,
 						IPA_EE_AP);
 		if (res)
-			IPAERR("Add HOLB monitor failed for gsi ch %d\n",
+			IPAERR("Add HOLB monitor failed for gsi ch %lu\n",
 					ep->gsi_chan_hdl);
 	}
 
@@ -1747,7 +1760,7 @@ int ipa3_enable_wigig_pipe_i(enum ipa_client_type client)
 	return 0;
 
 fail_ring_ch:
-	res = ipa3_stop_gsi_channel(ipa_ep_idx);
+	res = ipa_stop_gsi_channel(ipa_ep_idx);
 	if (res != 0 && res != -GSI_STATUS_AGAIN &&
 		res != -GSI_STATUS_TIMED_OUT) {
 		IPAERR("failed to stop channel res = %d\n", res);
@@ -1837,7 +1850,7 @@ int ipa3_disable_wigig_pipe_i(enum ipa_client_type client)
 		}
 	}
 retry_gsi_stop:
-	res = ipa3_stop_gsi_channel(ipa_ep_idx);
+	res = ipa_stop_gsi_channel(ipa_ep_idx);
 	if (res != 0 && res != -GSI_STATUS_AGAIN &&
 		res != -GSI_STATUS_TIMED_OUT) {
 		IPAERR("failed to stop channel res = %d\n", res);
@@ -1872,7 +1885,7 @@ retry_gsi_stop:
 	if (IPA_CLIENT_IS_PROD(ep->client)) {
 		memset(&ep_cfg_ctrl, 0, sizeof(struct ipa_ep_cfg_ctrl));
 		ep_cfg_ctrl.ipa_ep_delay = true;
-		ipa3_cfg_ep_ctrl(ipa_ep_idx, &ep_cfg_ctrl);
+		ipa_cfg_ep_ctrl(ipa_ep_idx, &ep_cfg_ctrl);
 	}
 
 	ep->gsi_offload_state &= ~IPA_WIGIG_ENABLED;
@@ -1906,7 +1919,7 @@ int ipa_wigig_send_wlan_msg(enum ipa_wlan_event msg_type,
 	wlan_msg = kzalloc(sizeof(*wlan_msg), GFP_KERNEL);
 	if (wlan_msg == NULL)
 		return -ENOMEM;
-	strlcpy(wlan_msg->name, netdev_name, IPA_RESOURCE_NAME_MAX);
+	strscpy(wlan_msg->name, netdev_name, IPA_RESOURCE_NAME_MAX);
 	memcpy(wlan_msg->mac_addr, mac, IPA_MAC_ADDR_SIZE);
 	msg_meta.msg_len = sizeof(struct ipa_wlan_msg);
 	msg_meta.msg_type = msg_type;
@@ -1934,7 +1947,7 @@ int ipa_wigig_send_msg(int msg_type,
 	wigig_msg = kzalloc(sizeof(struct ipa_wigig_msg), GFP_KERNEL);
 	if (wigig_msg == NULL)
 		return -ENOMEM;
-	strlcpy(wigig_msg->name, netdev_name, IPA_RESOURCE_NAME_MAX);
+	strscpy(wigig_msg->name, netdev_name, IPA_RESOURCE_NAME_MAX);
 	memcpy(wigig_msg->client_mac_addr, mac, IPA_MAC_ADDR_SIZE);
 	if (msg_type == WIGIG_CLIENT_CONNECT)
 		wigig_msg->u.ipa_client = client;

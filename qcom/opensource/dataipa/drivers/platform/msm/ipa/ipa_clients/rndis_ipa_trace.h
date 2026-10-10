@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #undef TRACE_SYSTEM
@@ -69,10 +70,13 @@ TRACE_EVENT(
 #endif /* _RNDIS_IPA_TRACE_H */
 
 /* This part must be outside protection */
-#undef TRACE_INCLUDE_PATH
+#ifndef RNDIS_TRACE_INCLUDE_PATH
 #ifdef CONFIG_IPA_VENDOR_DLKM
-#define TRACE_INCLUDE_PATH ../../../../sm8475-modules/qcom/opensource/dataipa/drivers/platform/msm/ipa/ipa_clients
+#define RNDIS_TRACE_INCLUDE_PATH ../../../../sm8475-modules/qcom/opensource/dataipa/drivers/platform/msm/ipa/ipa_clients
 #else
-#define TRACE_INCLUDE_PATH ../../techpack/dataipa/drivers/platform/msm/ipa/ipa_clients
+#define RNDIS_TRACE_INCLUDE_PATH ../../techpack/dataipa/drivers/platform/msm/ipa/ipa_clients
 #endif
+#endif
+
+#define TRACE_INCLUDE_PATH RNDIS_TRACE_INCLUDE_PATH
 #include <trace/define_trace.h>

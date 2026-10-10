@@ -24,6 +24,7 @@ ipam-y += \
 	ipa_v3/ipa_pm.o \
 	ipa_v3/ipa_wdi3_i.o \
 	ipa_v3/ipa_odl.o \
+	ipa_v3/ipa_opt_log.o \
 	ipa_v3/ipa_wigig_i.o \
 	ipa_v3/ipa_qdss.o \
 	ipa_v3/ipa_uc_holb_monitor.o \
@@ -33,17 +34,42 @@ ipam-y += \
 	ipa_v3/ipahal/ipahal_hw_stats.o \
 	ipa_v3/ipahal/ipahal_nat.o \
 	ipa_v3/ipa_eth_i.o \
-	ipa_v3/ipa_stats.o \
+	ipa_v3/ipa_elf_dump.o \
+	ipa_v3/ipa_stats.o
+
+ipam-$(CONFIG_IPA_TSP) += ipa_v3/ipa_tsp.o \
+	ipa_v3/ipahal/ipahal_tsp.o
 
 ipam-$(CONFIG_RMNET_IPA3) += ipa_v3/rmnet_ipa.o ipa_v3/ipa_qmi_service_v01.o \
 	ipa_v3/ipa_qmi_service.o ipa_v3/rmnet_ctl_ipa.o \
 	ipa_v3/rmnet_ipa_fd_ioctl.o ipa_v3/rmnet_ll_ipa.o
 
+ipam-$(CONFIG_IPA_CLIENTS_MANAGER) += ipa_clients/ipa_usb.o \
+	ipa_clients/ipa_wdi3.o \
+	ipa_clients/ipa_gsb.o \
+	ipa_clients/ipa_uc_offload.o \
+	ipa_clients/ipa_wigig.o \
+	ipa_clients/ipa_mhi_client.o \
+	ipa_clients/ipa_eth.o
+
+ipam-$(CONFIG_RNDIS_IPA) += ipa_clients/rndis_ipa.o
+
 ipam-$(CONFIG_IPA3_MHI_PRIME_MANAGER) += ipa_v3/ipa_mpm.o
 
 ipam-$(CONFIG_IPA3_MHI_PROXY) += ipa_v3/ipa_mhi_proxy.o
 ipam-$(CONFIG_IPA_EMULATION) += ipa_v3/ipa_dt_replacement.o
-ipam-$(CONFIG_IPA3_REGDUMP) += ipa_v3/dump/ipa_reg_dump.o
+
+ifneq (,$(filter $(CONFIG_IPA3_REGDUMP_IPA_4_5),y m))
+ipam-$(CONFIG_IPA3_REGDUMP) += ipa_v3/dump/ipa4.5/ipa_reg_dump.o
+endif
+
+ifneq (,$(filter $(CONFIG_IPA3_REGDUMP_IPA_5_0),y m))
+ipam-$(CONFIG_IPA3_REGDUMP) += ipa_v3/dump/ipa5.0/ipa_reg_dump.o
+endif
+
+ifneq (,$(filter $(CONFIG_IPA3_REGDUMP_IPA_5_5),y m))
+ipam-$(CONFIG_IPA3_REGDUMP) += ipa_v3/dump/ipa5.5/ipa_reg_dump.o
+endif
 
 ipam-$(CONFIG_IPA_UT) += test/ipa_ut_framework.o test/ipa_test_example.o \
 	test/ipa_test_mhi.o test/ipa_test_dma.o \

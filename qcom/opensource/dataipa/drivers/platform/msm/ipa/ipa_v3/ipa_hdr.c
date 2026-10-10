@@ -88,7 +88,7 @@ static int ipa3_hdr_proc_ctx_to_hw_format(struct ipa_mem_buffer *mem,
 			entry->type, entry->offset_entry->offset);
 
 		if (entry->l2tp_params.is_dst_pipe_valid) {
-			ep = ipa3_get_ep_mapping(entry->l2tp_params.dst_pipe);
+			ep = ipa_get_ep_mapping(entry->l2tp_params.dst_pipe);
 
 			if (ep >= 0) {
 				cfg_ptr = &ipa3_ctx->ep[ep].cfg;
@@ -106,6 +106,7 @@ static int ipa3_hdr_proc_ctx_to_hw_format(struct ipa_mem_buffer *mem,
 
 		/* Check the pointer and header length to avoid dangerous overflow in HW */
 		if (unlikely(!entry->hdr || !entry->hdr->offset_entry ||
+			!entry->offset_entry ||
 			entry->hdr->hdr_len > ipa_hdr_bin_sz[IPA_HDR_BIN_MAX - 1])) {
 			IPAERR_RL("Found invalid hdr entry\n");
 			return -EINVAL;
@@ -227,11 +228,11 @@ int __ipa_commit_hdr_v3_0(void)
 	}
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
-	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1
+	if (ipa_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1
 		&& !ipa3_ctx->ulso_wa) {
 		u32 offset = 0;
 
-		i = ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS);
+		i = ipa_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS);
 		reg_write_coal_close.skip_pipeline_clear = false;
 		reg_write_coal_close.pipeline_clear_options = IPAHAL_HPS_CLEAR;
 		if (ipa3_ctx->ipa_hw_type < IPA_HW_v5_0)
@@ -594,7 +595,7 @@ static int __ipa_add_hdr(struct ipa_hdr_add *hdr, bool user,
 
 	memcpy(entry->hdr, hdr->hdr, hdr->hdr_len);
 	entry->hdr_len = hdr->hdr_len;
-	strlcpy(entry->name, hdr->name, IPA_RESOURCE_NAME_MAX);
+	strscpy(entry->name, hdr->name, IPA_RESOURCE_NAME_MAX);
 	entry->is_partial = hdr->is_partial;
 	entry->type = hdr->type;
 	entry->is_eth2_ofst_valid = hdr->is_eth2_ofst_valid;
@@ -612,16 +613,13 @@ static int __ipa_add_hdr(struct ipa_hdr_add *hdr, bool user,
 
 			/* return if adding the same name */
 			if (!strcmp(entry_t->name, entry->name) && (user == true)) {
-				IPAERR_RL("IPACM Trying to add duplicate hdr %s\n",
-					entry_t->name);
+				IPAERR_RL("IPACM Trying to add hdr %s len=%d, duplicate entry, return old one\n",
+					entry->name, entry->hdr_len);
 
 				/* return the original entry */
-				if (entry_out) {
-					IPAERR_RL("return old entry len=%d hdl=%d\n",
-						entry_t->hdr_len, entry_t->id);
-					hdr->hdr_hdl = entry_t->id;
+				if (entry_out)
 					*entry_out = entry_t;
-				}
+
 				kmem_cache_free(ipa3_ctx->hdr_cache, entry);
 				return 0;
 			}
@@ -661,26 +659,35 @@ static int __ipa_add_hdr(struct ipa_hdr_add *hdr, bool user,
 		while (htbl->end + ipa_hdr_bin_sz[bin] > mem_size) {
 			if (entry->is_lcl) {
 				/* if header does not fit to SRAM table, place it in DDR */
+				IPADBG_LOW("SRAM header table was full allocting DDR header table! Requested: %d Left: %d name %s, end %d\n",
+						ipa_hdr_bin_sz[bin], mem_size - htbl->end, entry->name, htbl->end);
 				htbl = &ipa3_ctx->hdr_tbl[HDR_TBL_SYS];
 				mem_size = IPA_MEM_PART(apps_hdr_size_ddr);
 				entry->is_lcl = false;
-			} else {
-				/* check if DDR free list */
-				if (list_empty(&htbl->head_free_offset_list[bin])) {
+			}
+
+			/* check if DDR free list */
+			if (list_empty(&htbl->head_free_offset_list[bin])) {
+				if (!entry->is_lcl && (htbl->end + ipa_hdr_bin_sz[bin] > mem_size)) {
 					IPAERR("No space in DDR header buffer! Requested: %d Left: %d name %s, end %d\n",
-						ipa_hdr_bin_sz[bin], mem_size - htbl->end, entry->name, htbl->end);
+							ipa_hdr_bin_sz[bin], mem_size - htbl->end, entry->name, htbl->end);
 					goto bad_hdr_len;
-				} else {
-					/* get the first free slot */
-					offset = list_first_entry(&htbl->head_free_offset_list[bin],
-						struct ipa_hdr_offset_entry, link);
-					list_move(&offset->link, &htbl->head_offset_list[bin]);
-					entry->offset_entry = offset;
-					offset->ipacm_installed = user;
-					goto free_list;
 				}
+
+				IPADBG_LOW("No free offset in DDR allocating new offset Requested: %d Left: %d name %s, end %d\n",
+						ipa_hdr_bin_sz[bin], mem_size - htbl->end, entry->name, htbl->end);
+				goto create_entry;
+			} else {
+				/* get the first free slot */
+				offset = list_first_entry(&htbl->head_free_offset_list[bin],
+						struct ipa_hdr_offset_entry, link);
+				list_move(&offset->link, &htbl->head_offset_list[bin]);
+				entry->offset_entry = offset;
+				offset->ipacm_installed = user;
+				goto free_list;
 			}
 		}
+create_entry:
 		offset = kmem_cache_zalloc(ipa3_ctx->hdr_offset_cache,
 					   GFP_KERNEL);
 		if (!offset) {
@@ -1019,7 +1026,7 @@ int ipa3_del_hdr_hpc(struct ipa_ioc_del_hdr *hdrs)
 EXPORT_SYMBOL(ipa3_del_hdr_hpc);
 
 /**
- * ipa3_add_hdr() - add the specified headers to SW and optionally commit them
+ * ipa_add_hdr() - add the specified headers to SW and optionally commit them
  * to IPA HW
  * @hdrs:	[inout] set of headers to add
  *
@@ -1027,11 +1034,11 @@ EXPORT_SYMBOL(ipa3_del_hdr_hpc);
  *
  * Note:	Should not be called from atomic context
  */
-int ipa3_add_hdr(struct ipa_ioc_add_hdr *hdrs)
+int ipa_add_hdr(struct ipa_ioc_add_hdr *hdrs)
 {
 	return ipa3_add_hdr_usr(hdrs, false);
 }
-EXPORT_SYMBOL(ipa3_add_hdr);
+EXPORT_SYMBOL(ipa_add_hdr);
 
 /**
  * ipa3_add_hdr_usr() - add the specified headers to SW
@@ -1121,7 +1128,7 @@ bail:
 }
 
 /**
- * ipa3_del_hdr() - Remove the specified headers from SW
+ * ipa_del_hdr() - Remove the specified headers from SW
  * and optionally commit them to IPA HW
  * @hdls:	[inout] set of headers to delete
  *
@@ -1129,11 +1136,11 @@ bail:
  *
  * Note:	Should not be called from atomic context
  */
-int ipa3_del_hdr(struct ipa_ioc_del_hdr *hdls)
+int ipa_del_hdr(struct ipa_ioc_del_hdr *hdls)
 {
 	return ipa3_del_hdr_by_user(hdls, false);
 }
-EXPORT_SYMBOL(ipa3_del_hdr);
+EXPORT_SYMBOL(ipa_del_hdr);
 
 /**
  * ipa3_add_hdr_proc_ctx() - add the specified headers to SW
@@ -1240,6 +1247,7 @@ int ipa3_del_hdr_proc_ctx(struct ipa_ioc_del_hdr_proc_ctx *hdls)
 {
 	return ipa3_del_hdr_proc_ctx_by_user(hdls, false);
 }
+EXPORT_SYMBOL(ipa3_del_hdr_proc_ctx);
 
 /**
  * ipa3_commit_hdr() - commit to IPA HW the current header table in SW
@@ -1271,6 +1279,7 @@ bail:
 	mutex_unlock(&ipa3_ctx->lock);
 	return result;
 }
+EXPORT_SYMBOL(ipa3_commit_hdr);
 
 /**
  * ipa3_reset_hdr() - reset the current header table in SW (does not commit to
@@ -1444,6 +1453,7 @@ int ipa3_reset_hdr(bool user_only)
 	mutex_unlock(&ipa3_ctx->lock);
 	return 0;
 }
+EXPORT_SYMBOL(ipa3_reset_hdr);
 
 static struct ipa3_hdr_entry *__ipa_find_hdr(const char *name)
 {
@@ -1478,7 +1488,7 @@ static struct ipa3_hdr_proc_ctx_entry* __ipa_find_hdr_proc_ctx(const char *name)
 }
 
 /**
- * ipa3_get_hdr() - Lookup the specified header resource
+ * ipa_get_hdr() - Lookup the specified header resource
  * @lookup:	[inout] header to lookup and its handle
  *
  * lookup the specified header resource and return handle if it exists
@@ -1488,7 +1498,7 @@ static struct ipa3_hdr_proc_ctx_entry* __ipa_find_hdr_proc_ctx(const char *name)
  * Note:	Should not be called from atomic context
  *		Caller should call ipa3_put_hdr later if this function succeeds
  */
-int ipa3_get_hdr(struct ipa_ioc_get_hdr *lookup)
+int ipa_get_hdr(struct ipa_ioc_get_hdr *lookup)
 {
 	struct ipa3_hdr_entry *entry;
 	int result = -1;
@@ -1508,6 +1518,7 @@ int ipa3_get_hdr(struct ipa_ioc_get_hdr *lookup)
 
 	return result;
 }
+EXPORT_SYMBOL(ipa_get_hdr);
 
 /**
  * ipa3_get_hdr_offset() - Get the the offset of the specified header resource

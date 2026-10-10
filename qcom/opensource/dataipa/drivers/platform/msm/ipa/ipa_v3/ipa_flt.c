@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
+ *
+ * Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include "ipa_i.h"
@@ -453,14 +455,14 @@ static bool ipa_flt_skip_pipe_config(int pipe)
 
 	ep = &ipa3_ctx->ep[pipe];
 
-	if ((ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_PROD) == pipe
+	if ((ipa_get_ep_mapping(IPA_CLIENT_APPS_WAN_PROD) == pipe
 		&& ipa3_ctx->modem_cfg_emb_pipe_flt)
 		&& ep->client == IPA_CLIENT_APPS_WAN_PROD) {
 		IPADBG_LOW("skip %d\n", pipe);
 		return true;
 	}
 
-	if ((ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_LOW_LAT_DATA_PROD) == pipe
+	if ((ipa_get_ep_mapping(IPA_CLIENT_APPS_WAN_LOW_LAT_DATA_PROD) == pipe
 		&& ipa3_ctx->modem_cfg_emb_pipe_flt)
 		&& ep->client == IPA_CLIENT_APPS_WAN_LOW_LAT_DATA_PROD) {
 		IPADBG_LOW("skip %d\n", pipe);
@@ -612,11 +614,11 @@ int __ipa_commit_flt_v3(enum ipa_ip_type ip)
 	}
 
 	/* IC to close the coal frame before HPS Clear if coal is enabled */
-	if (ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1
+	if (ipa_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS) != -1
 		&& !ipa3_ctx->ulso_wa) {
 		u32 offset = 0;
 
-		i = ipa3_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS);
+		i = ipa_get_ep_mapping(IPA_CLIENT_APPS_WAN_COAL_CONS);
 		reg_write_coal_close.skip_pipeline_clear = false;
 		reg_write_coal_close.pipeline_clear_options = IPAHAL_HPS_CLEAR;
 		if (ipa3_ctx->ipa_hw_type < IPA_HW_v5_0)
@@ -1200,7 +1202,7 @@ error:
 
 static int __ipa_add_flt_get_ep_idx(enum ipa_client_type ep, int *ipa_ep_idx)
 {
-	*ipa_ep_idx = ipa3_get_ep_mapping(ep);
+	*ipa_ep_idx = ipa_get_ep_mapping(ep);
 	if (*ipa_ep_idx < 0 || *ipa_ep_idx >= ipa3_get_max_num_pipes()) {
 		IPAERR_RL("ep not valid ep=%d\n", ep);
 		return -EINVAL;
@@ -1248,7 +1250,7 @@ static void __ipa_convert_flt_rule_in(struct ipa_flt_rule rule_in,
 {
 	if (unlikely(sizeof(struct ipa_flt_rule) >
 			sizeof(struct ipa_flt_rule_i))) {
-		IPAERR_RL("invalid size in:%d size out:%d\n",
+		IPAERR_RL("invalid size in:%lu size out:%lu\n",
 			sizeof(struct ipa_flt_rule_i),
 			sizeof(struct ipa_flt_rule));
 		return;
@@ -1262,7 +1264,7 @@ static void __ipa_convert_flt_rule_out(struct ipa_flt_rule_i rule_in,
 {
 	if (unlikely(sizeof(struct ipa_flt_rule) >
 			sizeof(struct ipa_flt_rule_i))) {
-		IPAERR_RL("invalid size in:%d size out:%d\n",
+		IPAERR_RL("invalid size in:%lu size out:%lu\n",
 			sizeof(struct ipa_flt_rule_i),
 			sizeof(struct ipa_flt_rule));
 		return;
@@ -1276,7 +1278,7 @@ static void __ipa_convert_flt_mdfy_in(struct ipa_flt_rule_mdfy rule_in,
 {
 	if (unlikely(sizeof(struct ipa_flt_rule_mdfy) >
 			sizeof(struct ipa_flt_rule_mdfy_i))) {
-		IPAERR_RL("invalid size in:%d size out:%d\n",
+		IPAERR_RL("invalid size in:%lu size out:%lu\n",
 			sizeof(struct ipa_flt_rule_mdfy),
 			sizeof(struct ipa_flt_rule_mdfy_i));
 		return;
@@ -1293,7 +1295,7 @@ static void __ipa_convert_flt_mdfy_out(struct ipa_flt_rule_mdfy_i rule_in,
 {
 	if (unlikely(sizeof(struct ipa_flt_rule_mdfy) >
 			sizeof(struct ipa_flt_rule_mdfy_i))) {
-		IPAERR_RL("invalid size in:%d size out:%d\n",
+		IPAERR_RL("invalid size in:%lu size out:%lu\n",
 			sizeof(struct ipa_flt_rule_mdfy),
 			sizeof(struct ipa_flt_rule_mdfy_i));
 		return;
@@ -2012,6 +2014,81 @@ void ipa3_delete_dflt_flt_rules(u32 ipa_ep_idx)
 		/* Reset the sticky flag. */
 		tbl->sticky_rear = false;
 		ep->dflt_flt6_rule_hdl = 0;
+	}
+	mutex_unlock(&ipa3_ctx->lock);
+}
+
+void ipa3_install_dl_opt_wdi_dpath_flt_rules(u32 ipa_ep_idx, u32 rt_tbl_idx)
+{
+	struct ipa3_flt_tbl *tbl;
+	struct ipa3_ep_context *ep;
+	struct ipa_flt_rule_i rule;
+
+	if (ipa_ep_idx >= ipa3_get_max_num_pipes()) {
+		IPAERR("invalid ipa_ep_idx=%u\n", ipa_ep_idx);
+		ipa_assert();
+		return;
+	}
+
+	ep = &ipa3_ctx->ep[ipa_ep_idx];
+
+	if (!ipa_is_ep_support_flt(ipa_ep_idx)) {
+		IPADBG("cannot add flt rules to non filtering pipe num %d\n",
+			ipa_ep_idx);
+		return;
+	}
+
+	IPADBG("ipa ep idx: %d\n", ipa_ep_idx);
+	if (ipa3_ctx->ipa_wdi_opt_dpath)
+		IPA_EVENT_LOG("ipa ep idx: %d\n", ipa_ep_idx);
+
+	memset(&rule, 0, sizeof(rule));
+
+	mutex_lock(&ipa3_ctx->lock);
+	if (!ep->dl_flt4_rule_hdl) {
+		tbl = &ipa3_ctx->flt_tbl[ipa_ep_idx][IPA_IP_v4];
+		rule.eq_attrib_type = true;
+		rule.eq_attrib.rule_eq_bitmap = 1 << 5;
+		rule.eq_attrib.num_offset_meq_32 = 1;
+		rule.action = IPA_PASS_TO_ROUTING;
+		rule.rt_tbl_idx = rt_tbl_idx;
+		__ipa_add_flt_rule(tbl, IPA_IP_v4, &rule, false,
+				&ep->dl_flt4_rule_hdl, false);
+		ipa3_ctx->ctrl->ipa3_commit_flt(IPA_IP_v4);
+	}
+	if (!ep->dl_flt6_rule_hdl) {
+		tbl = &ipa3_ctx->flt_tbl[ipa_ep_idx][IPA_IP_v6];
+		rule.eq_attrib_type = true;
+		rule.eq_attrib.rule_eq_bitmap = 1 << 5;
+		rule.eq_attrib.num_offset_meq_32 = 1;
+		rule.action = IPA_PASS_TO_ROUTING;
+		rule.rt_tbl_idx = rt_tbl_idx;
+		__ipa_add_flt_rule(tbl, IPA_IP_v6, &rule, false,
+				&ep->dl_flt6_rule_hdl, false);
+		ipa3_ctx->ctrl->ipa3_commit_flt(IPA_IP_v6);
+	}
+	mutex_unlock(&ipa3_ctx->lock);
+}
+
+void ipa3_delete_dl_opt_wdi_dpath_flt_rules(u32 ipa_ep_idx)
+{
+	struct ipa3_ep_context *ep = &ipa3_ctx->ep[ipa_ep_idx];
+	struct ipa3_flt_tbl *tbl;
+
+	IPADBG("ipa3_delete_dl_opt_wdi_dpath_flt_rules: %d\n", ipa_ep_idx);
+
+	mutex_lock(&ipa3_ctx->lock);
+	if (ep->dl_flt4_rule_hdl) {
+		tbl = &ipa3_ctx->flt_tbl[ipa_ep_idx][IPA_IP_v4];
+		__ipa_del_flt_rule(ep->dl_flt4_rule_hdl);
+		ipa3_ctx->ctrl->ipa3_commit_flt(IPA_IP_v4);
+		ep->dl_flt4_rule_hdl = 0;
+	}
+	if (ep->dl_flt6_rule_hdl) {
+		tbl = &ipa3_ctx->flt_tbl[ipa_ep_idx][IPA_IP_v6];
+		__ipa_del_flt_rule(ep->dl_flt6_rule_hdl);
+		ipa3_ctx->ctrl->ipa3_commit_flt(IPA_IP_v6);
+		ep->dl_flt6_rule_hdl = 0;
 	}
 	mutex_unlock(&ipa3_ctx->lock);
 }

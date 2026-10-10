@@ -1,20 +1,22 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
+ *
+ * Copyright (c) 2023-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _IPA_COMMON_I_H_
 #define _IPA_COMMON_I_H_
-#include <linux/ipa_mhi.h>
 #include <linux/ipa_qmi_service_v01.h>
 #include <linux/errno.h>
 #include <linux/ipc_logging.h>
-#include <linux/ipa.h>
-#include <linux/ipa_uc_offload.h>
-#include <linux/ipa_wdi3.h>
-#include <linux/ipa_wigig.h>
-#include <linux/ipa_eth.h>
+#include "ipa.h"
+#include "ipa_uc_offload.h"
+#include "ipa_wdi3.h"
+#include "ipa_wigig.h"
+#include "ipa_eth.h"
 #include <linux/ipa_usb.h>
+#include <linux/ipa_mhi.h>
 #include <linux/ratelimit.h>
 #include "ipa_stats.h"
 #include "gsi.h"
@@ -129,6 +131,7 @@
 		ipa3_dec_client_disable_clks_no_block(&log_info); \
 	} while (0)
 
+#ifdef IPA_DEBUG
 /*
  * Printing one warning message in 5 seconds if multiple warning messages
  * are coming back to back.
@@ -144,6 +147,9 @@
 	if (unlikely(rtn && __ratelimit(&_rs)))			\
 		WARN_ON(rtn);					\
 })
+#else
+#define WARN_ON_RATELIMIT_IPA(condition) ((void)0)
+#endif
 
 /*
  * Printing one error message in 5 seconds if multiple error messages
@@ -170,14 +176,27 @@ do {\
 	(x < IPA_CLIENT_MAX && (x & 0x1) == 0)
 #define IPA_CLIENT_IS_CONS(x) \
 	(x < IPA_CLIENT_MAX && (x & 0x1) == 1)
+/*
+ * The following macro does two things:
+ *   1) It checks to see if client x is allocated, and
+ *   2) It assigns a value to index idx
+ */
+#define IPA_CLIENT_IS_MAPPED(x, idx) \
+	((idx = ipa_get_ep_mapping(x)) != IPA_EP_NOT_ALLOCATED)
+/*
+ * Same behavior as the macro above; but in addition, determines if
+ * the client is valid as well.
+ */
+#define IPA_CLIENT_IS_MAPPED_VALID(x, idx) \
+	(IPA_CLIENT_IS_MAPPED(x, idx) && ipa3_ctx->ep[idx].valid == 1)
 #define IPA_CLIENT_IS_ETH_PROD(x) \
-	((x == ipa3_get_ep_mapping(IPA_CLIENT_ETHERNET_PROD)) || \
-	 (x == ipa3_get_ep_mapping(IPA_CLIENT_ETHERNET2_PROD)) || \
-	 (x == ipa3_get_ep_mapping(IPA_CLIENT_AQC_ETHERNET_PROD)) || \
-	 (x == ipa3_get_ep_mapping(IPA_CLIENT_RTK_ETHERNET_PROD)))
+	((x == ipa_get_ep_mapping(IPA_CLIENT_ETHERNET_PROD)) || \
+	 (x == ipa_get_ep_mapping(IPA_CLIENT_ETHERNET2_PROD)) || \
+	 (x == ipa_get_ep_mapping(IPA_CLIENT_AQC_ETHERNET_PROD)) || \
+	 (x == ipa_get_ep_mapping(IPA_CLIENT_RTK_ETHERNET_PROD)))
 
-#define IPA_GSI_CHANNEL_STOP_SLEEP_MIN_USEC (3000)
-#define IPA_GSI_CHANNEL_STOP_SLEEP_MAX_USEC (5000)
+#define IPA_GSI_CHANNEL_STOP_SLEEP_MIN_USEC (1000)
+#define IPA_GSI_CHANNEL_STOP_SLEEP_MAX_USEC (2000)
 
 #define STR_ETH_IFACE "eth"
 #define STR_ETH0_IFACE "eth0"
@@ -602,6 +621,8 @@ int ipa3_ntn_uc_reg_rdyCB(void (*ipauc_ready_cb)(void *user_data),
 			      void *user_data);
 void ipa3_ntn_uc_dereg_rdyCB(void);
 
+void ipa3_setup_wlan_ctrl_ready_req(void);
+
 int ipa3_conn_wdi3_pipes(struct ipa_wdi_conn_in_params *in,
 	struct ipa_wdi_conn_out_params *out,
 	ipa_wdi_meter_notifier_cb wdi_notify,
@@ -616,12 +637,22 @@ int ipa3_enable_wdi3_pipes(int ipa_ep_idx_tx, int ipa_ep_idx_rx,
 int ipa3_disable_wdi3_pipes(int ipa_ep_idx_tx, int ipa_ep_idx_rx,
 	int ipa_ep_idx_tx1, int ipa_ep_idx_rx1);
 
+int ipa3_enable_wdi3_opt_dpath(int ipa_ep_idx_rx, int ipa_ep_idx_tx,
+	u32 rt_tbl_idx);
+
+int ipa3_disable_wdi3_opt_dpath(int ipa_ep_idx_rx, int ipa_ep_idx_tx);
+
+bool ipa3_check_wdi_opt_chn_empty(int ipa_ep_idx_rx);
+
 const char *ipa_get_version_string(enum ipa_hw_type ver);
 int ipa3_start_gsi_channel(u32 clnt_hdl);
 
 int ipa_smmu_store_sgt(struct sg_table **out_ch_ptr,
 		struct sg_table *in_sgt_ptr);
 int ipa_smmu_free_sgt(struct sg_table **out_sgt_ptr);
+
+int ipa3_get_outstanding_buffers_wdi3(int ipa_ep_idx_rx,
+	int ipa_ep_idx_tx, struct ipa_wdi_outstanding_buffs *out);
 
 #ifdef CONFIG_IPA_UT
 int ipa_ut_module_init(void);
@@ -719,15 +750,9 @@ int ipa3_add_hdr_hpc_usr(struct ipa_ioc_add_hdr *hdrs, bool user_only);
 
 int ipa3_del_hdr_hpc(struct ipa_ioc_del_hdr *hdrs);
 
-int ipa3_add_hdr(struct ipa_ioc_add_hdr *hdrs);
-
-int ipa3_del_hdr(struct ipa_ioc_del_hdr *hdls);
-
 int ipa3_add_hdr_usr(struct ipa_ioc_add_hdr *hdrs, bool user_only);
 
 int ipa3_reset_hdr(bool user_only);
-
-int ipa3_get_hdr(struct ipa_ioc_get_hdr *lookup);
 
 /*
 * Header Processing Context
@@ -834,12 +859,9 @@ int ipa3_remove_interrupt_handler(enum ipa_irq_type interrupt);
 /*
 * Interface
 */
-int ipa3_register_intf(const char *name, const struct ipa_tx_intf *tx,
-	const struct ipa_rx_intf *rx);
 int ipa3_register_intf_ext(const char *name, const struct ipa_tx_intf *tx,
 	const struct ipa_rx_intf *rx,
 	const struct ipa_ext_intf *ext);
-int ipa3_deregister_intf(const char *name);
 
 /*
 * Miscellaneous
@@ -851,9 +873,6 @@ int ipa3_uc_debug_stats_dealloc(uint32_t protocol);
 void ipa3_get_gsi_stats(int prot_id,
 	struct ipa_uc_dbg_ring_stats *stats);
 int ipa3_get_prot_id(enum ipa_client_type client);
-bool ipa_is_client_handle_valid(u32 clnt_hdl);
-int ipa3_get_smmu_params(struct ipa_smmu_in_params *in,
-	struct ipa_smmu_out_params *out);
 
 /**
 * ipa_tz_unlock_reg - Unlocks memory regions so that they become accessible
