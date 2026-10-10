@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -233,6 +233,7 @@ enum {
 	LPASS_CDC_WSA2_MACRO_AIF_MIX1_PB,
 	LPASS_CDC_WSA2_MACRO_AIF_VI,
 	LPASS_CDC_WSA2_MACRO_AIF_ECHO,
+	LPASS_CDC_WSA2_MACRO_AIF_CPS,
 	LPASS_CDC_WSA2_MACRO_MAX_DAIS,
 };
 
@@ -743,6 +744,7 @@ static int lpass_cdc_wsa2_macro_hw_params(struct snd_pcm_substream *substream,
 	case SNDRV_PCM_STREAM_CAPTURE:
 		if (dai->id == LPASS_CDC_WSA2_MACRO_AIF_VI)
 			wsa2_priv->pcm_rate_vi = params_rate(params);
+		break;
 	default:
 		break;
 	}
@@ -831,6 +833,9 @@ static int lpass_cdc_wsa2_macro_mute_stream(struct snd_soc_dai *dai, int mute, i
 	struct snd_soc_component *component = dai->component;
 	struct device *wsa2_dev = NULL;
 	struct lpass_cdc_wsa2_macro_priv *wsa2_priv = NULL;
+	uint16_t j = 0, reg = 0, mix_reg = 0, dsm_reg = 0;
+	u16 int_mux_cfg0 = 0, int_mux_cfg1 = 0;
+	u8 int_mux_cfg0_val = 0, int_mux_cfg1_val = 0;
 	bool adie_lb = false;
 
 	if (mute)
@@ -839,13 +844,44 @@ static int lpass_cdc_wsa2_macro_mute_stream(struct snd_soc_dai *dai, int mute, i
 	if (!lpass_cdc_wsa2_macro_get_data(component, &wsa2_dev, &wsa2_priv, __func__))
 		return -EINVAL;
 
+	switch (dai->id) {
+	case LPASS_CDC_WSA2_MACRO_AIF1_PB:
+	case LPASS_CDC_WSA2_MACRO_AIF_MIX1_PB:
+	for (j = 0; j < NUM_INTERPOLATORS; j++) {
+		reg = LPASS_CDC_WSA2_RX0_RX_PATH_CTL +
+				(j * LPASS_CDC_WSA2_MACRO_RX_PATH_OFFSET);
+		mix_reg = LPASS_CDC_WSA2_RX0_RX_PATH_MIX_CTL +
+				(j * LPASS_CDC_WSA2_MACRO_RX_PATH_OFFSET);
+		dsm_reg = LPASS_CDC_WSA2_RX0_RX_PATH_CTL +
+				(j * LPASS_CDC_WSA2_MACRO_RX_PATH_OFFSET) +
+				LPASS_CDC_WSA2_MACRO_RX_PATH_DSMDEM_OFFSET;
+		int_mux_cfg0 = LPASS_CDC_WSA2_RX_INP_MUX_RX_INT0_CFG0 + j * 8;
+		int_mux_cfg1 = int_mux_cfg0 + 4;
+		int_mux_cfg0_val = snd_soc_component_read(component,
+							int_mux_cfg0);
+		int_mux_cfg1_val = snd_soc_component_read(component,
+							int_mux_cfg1);
+		if (snd_soc_component_read(component, dsm_reg) & 0x01) {
+			if (int_mux_cfg0_val || (int_mux_cfg1_val & 0x38))
+				snd_soc_component_update_bits(component, reg,
+							0x20, 0x20);
+			if (int_mux_cfg1_val & 0x07) {
+				snd_soc_component_update_bits(component, reg,
+							0x20, 0x20);
+				snd_soc_component_update_bits(component,
+						mix_reg, 0x20, 0x20);
+			}
+		}
+	}
 	lpass_cdc_wsa_pa_on(wsa2_dev, adie_lb);
 	lpass_cdc_wsa2_unmute_interpolator(dai);
 	lpass_cdc_wsa2_macro_enable_vi_decimator(component);
-
+		break;
+	default:
+		break;
+	}
 	return 0;
 }
-
 static int lpass_cdc_wsa2_macro_mclk_enable(
 				struct lpass_cdc_wsa2_macro_priv *wsa2_priv,
 				 bool mclk_enable, bool dapm)
@@ -968,7 +1004,6 @@ static int lpass_cdc_wsa2_macro_event_handler(struct snd_soc_component *componen
 	switch (event) {
 	case LPASS_CDC_MACRO_EVT_SSR_DOWN:
 		wsa2_priv->pre_dev_up = false;
-		trace_printk("%s, enter SSR down\n", __func__);
 		if (wsa2_priv->swr_ctrl_data) {
 			swrm_wcd_notify(
 				wsa2_priv->swr_ctrl_data[0].wsa2_swr_pdev,
@@ -987,7 +1022,6 @@ static int lpass_cdc_wsa2_macro_event_handler(struct snd_soc_component *componen
 	case LPASS_CDC_MACRO_EVT_PRE_SSR_UP:
 		break;
 	case LPASS_CDC_MACRO_EVT_SSR_UP:
-		trace_printk("%s, enter SSR up\n", __func__);
 		wsa2_priv->pre_dev_up = true;
 		/* reset swr after ssr/pdr */
 		wsa2_priv->reset_swr = true;
@@ -1237,7 +1271,6 @@ static int lpass_cdc_wsa2_macro_enable_mix_path(struct snd_soc_dapm_widget *w,
 	u16 gain_reg;
 	int offset_val = 0;
 	int val = 0;
-	uint16_t mix_reg = 0;
 
 	dev_dbg(component->dev, "%s %d %s\n", __func__, event, w->name);
 
@@ -1251,12 +1284,8 @@ static int lpass_cdc_wsa2_macro_enable_mix_path(struct snd_soc_dapm_widget *w,
 		return 0;
 	}
 
-	mix_reg = LPASS_CDC_WSA2_RX0_RX_PATH_MIX_CTL +
-				LPASS_CDC_WSA2_MACRO_RX_PATH_OFFSET * w->shift;
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
-		snd_soc_component_update_bits(component,
-					mix_reg, 0x20, 0x20);
 		lpass_cdc_wsa2_macro_enable_swr(w, kcontrol, event);
 		val = snd_soc_component_read(component, gain_reg);
 		val += offset_val;
@@ -1465,10 +1494,10 @@ static int lpass_cdc_wsa2_macro_enable_main_path(struct snd_soc_dapm_widget *w,
 			LPASS_CDC_WSA2_MACRO_RX_PATH_OFFSET * w->shift;
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
-		snd_soc_component_update_bits(component,
-				reg, 0x20, 0x20);
 		if (lpass_cdc_wsa2_macro_adie_lb(component, w->shift)) {
 			adie_lb = true;
+			snd_soc_component_update_bits(component,
+						reg, 0x20, 0x20);
 			lpass_cdc_wsa_pa_on(wsa2_dev, adie_lb);
 		}
 		break;
@@ -1869,7 +1898,7 @@ static int lpass_cdc_wsa2_macro_get_ec_hq(struct snd_kcontrol *kcontrol,
 
 	struct snd_soc_component *component =
 				snd_soc_kcontrol_component(kcontrol);
-	int ec_tx = ((struct soc_multi_mixer_control *)
+	int ec_tx = ((struct soc_mixer_control *)
 		    kcontrol->private_value)->shift;
 	struct device *wsa2_dev = NULL;
 	struct lpass_cdc_wsa2_macro_priv *wsa2_priv = NULL;
@@ -1886,7 +1915,7 @@ static int lpass_cdc_wsa2_macro_set_ec_hq(struct snd_kcontrol *kcontrol,
 {
 	struct snd_soc_component *component =
 				snd_soc_kcontrol_component(kcontrol);
-	int ec_tx = ((struct soc_multi_mixer_control *)
+	int ec_tx = ((struct soc_mixer_control *)
 		    kcontrol->private_value)->shift;
 	int value = ucontrol->value.integer.value[0];
 	struct device *wsa2_dev = NULL;
@@ -1910,7 +1939,7 @@ static int lpass_cdc_wsa2_macro_get_rx_mute_status(struct snd_kcontrol *kcontrol
 				snd_soc_kcontrol_component(kcontrol);
 	struct device *wsa2_dev = NULL;
 	struct lpass_cdc_wsa2_macro_priv *wsa2_priv = NULL;
-	int wsa2_rx_shift = ((struct soc_multi_mixer_control *)
+	int wsa2_rx_shift = ((struct soc_mixer_control *)
 		       kcontrol->private_value)->shift;
 
 	if (!lpass_cdc_wsa2_macro_get_data(component, &wsa2_dev, &wsa2_priv, __func__))
@@ -1929,7 +1958,7 @@ static int lpass_cdc_wsa2_macro_set_rx_mute_status(struct snd_kcontrol *kcontrol
 	struct device *wsa2_dev = NULL;
 	struct lpass_cdc_wsa2_macro_priv *wsa2_priv = NULL;
 	int value = ucontrol->value.integer.value[0];
-	int wsa2_rx_shift = ((struct soc_multi_mixer_control *)
+	int wsa2_rx_shift = ((struct soc_mixer_control *)
 			kcontrol->private_value)->shift;
 	int ret = 0;
 
@@ -2033,7 +2062,7 @@ static int lpass_cdc_wsa2_macro_get_compander(struct snd_kcontrol *kcontrol,
 
 	struct snd_soc_component *component =
 				snd_soc_kcontrol_component(kcontrol);
-	int comp = ((struct soc_multi_mixer_control *)
+	int comp = ((struct soc_mixer_control *)
 		    kcontrol->private_value)->shift;
 	struct device *wsa2_dev = NULL;
 	struct lpass_cdc_wsa2_macro_priv *wsa2_priv = NULL;
@@ -2050,7 +2079,7 @@ static int lpass_cdc_wsa2_macro_set_compander(struct snd_kcontrol *kcontrol,
 {
 	struct snd_soc_component *component =
 				snd_soc_kcontrol_component(kcontrol);
-	int comp = ((struct soc_multi_mixer_control *)
+	int comp = ((struct soc_mixer_control *)
 		    kcontrol->private_value)->shift;
 	int value = ucontrol->value.integer.value[0];
 	struct device *wsa2_dev = NULL;
@@ -2283,7 +2312,7 @@ static int lpass_cdc_wsa2_macro_soft_clip_enable_get(struct snd_kcontrol *kcontr
 			snd_soc_kcontrol_component(kcontrol);
 	struct device *wsa2_dev = NULL;
 	struct lpass_cdc_wsa2_macro_priv *wsa2_priv = NULL;
-	int path = ((struct soc_multi_mixer_control *)
+	int path = ((struct soc_mixer_control *)
 		    kcontrol->private_value)->shift;
 
 	if (!lpass_cdc_wsa2_macro_get_data(component, &wsa2_dev, &wsa2_priv, __func__))
@@ -2304,7 +2333,7 @@ static int lpass_cdc_wsa2_macro_soft_clip_enable_put(struct snd_kcontrol *kcontr
 			snd_soc_kcontrol_component(kcontrol);
 	struct device *wsa2_dev = NULL;
 	struct lpass_cdc_wsa2_macro_priv *wsa2_priv = NULL;
-	int path = ((struct soc_multi_mixer_control *)
+	int path = ((struct soc_mixer_control *)
 		    kcontrol->private_value)->shift;
 
 	if (!lpass_cdc_wsa2_macro_get_data(component, &wsa2_dev, &wsa2_priv, __func__))
@@ -2392,8 +2421,8 @@ static int lpass_cdc_wsa2_macro_vi_feed_mixer_get(struct snd_kcontrol *kcontrol,
 		snd_soc_dapm_kcontrol_widget(kcontrol);
 	struct snd_soc_component *component =
 				snd_soc_dapm_to_component(widget->dapm);
-	struct soc_multi_mixer_control *mixer =
-		((struct soc_multi_mixer_control *)kcontrol->private_value);
+	struct soc_mixer_control *mixer =
+		((struct soc_mixer_control *)kcontrol->private_value);
 	u32 dai_id = widget->shift;
 	u32 spk_tx_id = mixer->shift;
 	struct device *wsa2_dev = NULL;
@@ -2417,8 +2446,8 @@ static int lpass_cdc_wsa2_macro_vi_feed_mixer_put(struct snd_kcontrol *kcontrol,
 		snd_soc_dapm_kcontrol_widget(kcontrol);
 	struct snd_soc_component *component =
 				snd_soc_dapm_to_component(widget->dapm);
-	struct soc_multi_mixer_control *mixer =
-		((struct soc_multi_mixer_control *)kcontrol->private_value);
+	struct soc_mixer_control *mixer =
+		((struct soc_mixer_control *)kcontrol->private_value);
 	u32 spk_tx_id = mixer->shift;
 	u32 enable = ucontrol->value.integer.value[0];
 	struct device *wsa2_dev = NULL;
@@ -2472,6 +2501,93 @@ static const struct snd_kcontrol_new aif_vi_mixer[] = {
 	SOC_SINGLE_EXT("WSA2_SPKR_VI_2", SND_SOC_NOPM, LPASS_CDC_WSA2_MACRO_TX1, 1, 0,
 			lpass_cdc_wsa2_macro_vi_feed_mixer_get,
 			lpass_cdc_wsa2_macro_vi_feed_mixer_put),
+};
+
+static int lpass_cdc_wsa2_macro_cps_feed_mixer_get(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_dapm_widget *widget =
+		snd_soc_dapm_kcontrol_widget(kcontrol);
+	struct snd_soc_component *component =
+				snd_soc_dapm_to_component(widget->dapm);
+	struct soc_mixer_control *mixer =
+		((struct soc_mixer_control *)kcontrol->private_value);
+	u32 dai_id = widget->shift;
+	u32 spk_tx_id = mixer->shift;
+	struct device *wsa2_dev = NULL;
+	struct lpass_cdc_wsa2_macro_priv *wsa2_priv = NULL;
+
+	if (!lpass_cdc_wsa2_macro_get_data(component, &wsa2_dev, &wsa2_priv, __func__))
+		return -EINVAL;
+
+	if (test_bit(spk_tx_id, &wsa2_priv->active_ch_mask[dai_id]))
+		ucontrol->value.integer.value[0] = 1;
+	else
+		ucontrol->value.integer.value[0] = 0;
+
+	return 0;
+}
+
+static int lpass_cdc_wsa2_macro_cps_feed_mixer_put(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_dapm_widget *widget =
+		snd_soc_dapm_kcontrol_widget(kcontrol);
+	struct snd_soc_component *component =
+				snd_soc_dapm_to_component(widget->dapm);
+	struct soc_mixer_control *mixer =
+		((struct soc_mixer_control *)kcontrol->private_value);
+	u32 spk_tx_id = mixer->shift;
+	u32 enable = ucontrol->value.integer.value[0];
+	struct device *wsa2_dev = NULL;
+	struct lpass_cdc_wsa2_macro_priv *wsa2_priv = NULL;
+
+	if (!lpass_cdc_wsa2_macro_get_data(component, &wsa2_dev, &wsa2_priv, __func__))
+		return -EINVAL;
+
+	if (enable) {
+		if (spk_tx_id == LPASS_CDC_WSA2_MACRO_TX0 &&
+			!test_bit(LPASS_CDC_WSA2_MACRO_TX0,
+				&wsa2_priv->active_ch_mask[LPASS_CDC_WSA2_MACRO_AIF_CPS])) {
+			set_bit(LPASS_CDC_WSA2_MACRO_TX0,
+				&wsa2_priv->active_ch_mask[LPASS_CDC_WSA2_MACRO_AIF_CPS]);
+			wsa2_priv->active_ch_cnt[LPASS_CDC_WSA2_MACRO_AIF_CPS]++;
+		}
+		if (spk_tx_id == LPASS_CDC_WSA2_MACRO_TX1 &&
+			!test_bit(LPASS_CDC_WSA2_MACRO_TX1,
+				&wsa2_priv->active_ch_mask[LPASS_CDC_WSA2_MACRO_AIF_CPS])) {
+			set_bit(LPASS_CDC_WSA2_MACRO_TX1,
+				&wsa2_priv->active_ch_mask[LPASS_CDC_WSA2_MACRO_AIF_CPS]);
+			wsa2_priv->active_ch_cnt[LPASS_CDC_WSA2_MACRO_AIF_CPS]++;
+		}
+	} else {
+		if (spk_tx_id == LPASS_CDC_WSA2_MACRO_TX0 &&
+			test_bit(LPASS_CDC_WSA2_MACRO_TX0,
+				&wsa2_priv->active_ch_mask[LPASS_CDC_WSA2_MACRO_AIF_CPS])) {
+			clear_bit(LPASS_CDC_WSA2_MACRO_TX0,
+				&wsa2_priv->active_ch_mask[LPASS_CDC_WSA2_MACRO_AIF_CPS]);
+			wsa2_priv->active_ch_cnt[LPASS_CDC_WSA2_MACRO_AIF_CPS]--;
+		}
+		if (spk_tx_id == LPASS_CDC_WSA2_MACRO_TX1 &&
+			test_bit(LPASS_CDC_WSA2_MACRO_TX1,
+				&wsa2_priv->active_ch_mask[LPASS_CDC_WSA2_MACRO_AIF_CPS])) {
+			clear_bit(LPASS_CDC_WSA2_MACRO_TX1,
+				&wsa2_priv->active_ch_mask[LPASS_CDC_WSA2_MACRO_AIF_CPS]);
+			wsa2_priv->active_ch_cnt[LPASS_CDC_WSA2_MACRO_AIF_CPS]--;
+		}
+	}
+	snd_soc_dapm_mixer_update_power(widget->dapm, kcontrol, enable, NULL);
+
+	return 0;
+}
+
+static const struct snd_kcontrol_new aif_cps_mixer[] = {
+	SOC_SINGLE_EXT("WSA2_SPKR_CPS_1", SND_SOC_NOPM, LPASS_CDC_WSA2_MACRO_TX0, 1, 0,
+			lpass_cdc_wsa2_macro_cps_feed_mixer_get,
+			lpass_cdc_wsa2_macro_cps_feed_mixer_put),
+	SOC_SINGLE_EXT("WSA2_SPKR_CPS_2", SND_SOC_NOPM, LPASS_CDC_WSA2_MACRO_TX1, 1, 0,
+			lpass_cdc_wsa2_macro_cps_feed_mixer_get,
+			lpass_cdc_wsa2_macro_cps_feed_mixer_put),
 };
 
 static const struct snd_soc_dapm_widget lpass_cdc_wsa2_macro_dapm_widgets[] = {
@@ -2816,9 +2932,6 @@ static int wsa2_swrm_clock(void *handle, bool enable)
 
 	mutex_lock(&wsa2_priv->swr_clk_lock);
 
-	trace_printk("%s: %s swrm clock %s\n",
-		dev_name(wsa2_priv->dev), __func__,
-		(enable ? "enable" : "disable"));
 	dev_dbg(wsa2_priv->dev, "%s: swrm clock %s\n",
 		__func__, (enable ? "enable" : "disable"));
 	if (enable) {
@@ -2887,9 +3000,6 @@ static int wsa2_swrm_clock(void *handle, bool enable)
 			}
 		}
 	}
-	trace_printk("%s: %s swrm clock users: %d\n",
-		dev_name(wsa2_priv->dev), __func__,
-		wsa2_priv->swr_clk_users);
 	dev_dbg(wsa2_priv->dev, "%s: swrm clock users %d\n",
 		__func__, wsa2_priv->swr_clk_users);
 exit:
@@ -2943,7 +3053,7 @@ static int lpass_cdc_wsa2_macro_set_cur_state(
 		wsa2_priv->thermal_cur_state = state;
 	} else {
 		dev_err(wsa2_priv->dev,
-			"%s: incorrect requested state:%d\n",
+			"%s: incorrect requested state:%lu\n",
 			__func__, state);
 		return -EINVAL;
 	}

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/kernel.h>
@@ -11,7 +11,6 @@
 #include <linux/of.h>
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
-#include "../../../drivers/clk/qcom/common.h"
 #include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
 #include <dsp/apr_audio-v2.h>
@@ -86,7 +85,6 @@ static int audio_ext_clk_prepare(struct clk_hw *hw)
 		(clk_priv->clk_src < AUDIO_EXT_CLK_LPASS_MAX) && !clk_priv->clk_cfg.enable)  {
 #ifdef CONFIG_AUDIO_PRM
 	    pr_debug("%s: clk_id %x ",__func__, clk_priv->prm_clk_cfg.clk_id);
-	    trace_printk("%s: clk_id %x \n", __func__, clk_priv->prm_clk_cfg.clk_id);
 		ret = audio_prm_set_lpass_clk_cfg(&clk_priv->prm_clk_cfg,1);
 #else
 		ret = afe_set_lpass_clk_cfg(IDX_RSVD_3, &clk_priv->clk_cfg);
@@ -138,8 +136,7 @@ static void audio_ext_clk_unprepare(struct clk_hw *hw)
 #ifdef CONFIG_AUDIO_PRM
 		pr_debug("%s: clk_id %x",__func__,
 				clk_priv->prm_clk_cfg.clk_id);
-		ret = audio_prm_set_lpass_clk_cfg(&clk_priv->prm_clk_cfg,0);
-		 trace_printk("%s: clk_id %x \n", __func__, clk_priv->prm_clk_cfg.clk_id);
+		ret = audio_prm_set_lpass_clk_cfg(&clk_priv->prm_clk_cfg, 0);
 #else
 		ret = afe_set_lpass_clk_cfg(IDX_RSVD_3, &clk_priv->clk_cfg);
 #endif
@@ -183,7 +180,6 @@ static int lpass_hw_vote_prepare(struct clk_hw *hw)
 		pr_debug("%s: core vote clk_id %x \n",__func__, clk_priv->prm_clk_cfg.clk_id);
 		ret = audio_prm_set_lpass_hw_core_req(&clk_priv->prm_clk_cfg,
 			HW_CORE_ID_LPASS, 1);
-		 trace_printk("%s: core vote clk_id %x \n", __func__, clk_priv->prm_clk_cfg.clk_id);
 #else
 		ret = afe_vote_lpass_core_hw(AFE_LPASS_CORE_HW_MACRO_BLOCK,
 			"LPASS_HW_MACRO",
@@ -202,7 +198,6 @@ static int lpass_hw_vote_prepare(struct clk_hw *hw)
 		pr_debug("%s: audio vote clk_id %x \n",__func__, clk_priv->prm_clk_cfg.clk_id);
 		ret = audio_prm_set_lpass_hw_core_req(&clk_priv->prm_clk_cfg,
 			HW_CORE_ID_DCODEC, 1);
-		trace_printk("%s: audio vote clk_id %x \n", __func__, clk_priv->prm_clk_cfg.clk_id);
 #else
 		ret = afe_vote_lpass_core_hw(AFE_LPASS_CORE_HW_DCODEC_BLOCK,
 			"LPASS_HW_DCODEC",
@@ -226,10 +221,9 @@ static void lpass_hw_vote_unprepare(struct clk_hw *hw)
 
 	if (clk_priv->clk_src == AUDIO_EXT_CLK_LPASS_CORE_HW_VOTE) {
 #ifdef CONFIG_AUDIO_PRM
-                pr_debug("%s: core vote clk_id %x \n",__func__, clk_priv->prm_clk_cfg.clk_id);
-                ret = audio_prm_set_lpass_hw_core_req(&clk_priv->prm_clk_cfg,
-                        HW_CORE_ID_LPASS, 0);
-		 trace_printk("%s: core vote clk_id %x \n", __func__, clk_priv->prm_clk_cfg.clk_id);
+		pr_debug("%s: core vote clk_id %x \n", __func__, clk_priv->prm_clk_cfg.clk_id);
+		ret = audio_prm_set_lpass_hw_core_req(&clk_priv->prm_clk_cfg,
+				HW_CORE_ID_LPASS, 0);
 #else
 		ret = afe_unvote_lpass_core_hw(
 			AFE_LPASS_CORE_HW_MACRO_BLOCK,
@@ -244,10 +238,9 @@ static void lpass_hw_vote_unprepare(struct clk_hw *hw)
 	if (clk_priv->clk_src == AUDIO_EXT_CLK_LPASS_AUDIO_HW_VOTE) {
 
 #ifdef CONFIG_AUDIO_PRM
-                pr_debug("%s: audio vote clk_id %x \n",__func__, clk_priv->prm_clk_cfg.clk_id);
-                ret = audio_prm_set_lpass_hw_core_req(&clk_priv->prm_clk_cfg,
-                        HW_CORE_ID_DCODEC, 0);
-		trace_printk("%s: audio vote clk_id %x \n", __func__, clk_priv->prm_clk_cfg.clk_id);
+		pr_debug("%s: audio vote clk_id %x \n", __func__, clk_priv->prm_clk_cfg.clk_id);
+		ret = audio_prm_set_lpass_hw_core_req(&clk_priv->prm_clk_cfg,
+				HW_CORE_ID_DCODEC, 0);
 #else
 		ret = afe_unvote_lpass_core_hw(
 			AFE_LPASS_CORE_HW_DCODEC_BLOCK,

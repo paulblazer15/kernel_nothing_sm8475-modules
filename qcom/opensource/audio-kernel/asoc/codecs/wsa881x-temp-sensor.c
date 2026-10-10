@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2015, 2017-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/bitops.h>
@@ -17,6 +18,7 @@
 #define HIGH_TEMP_THRESHOLD 45
 #define TEMP_INVALID	0xFFFF
 #define WSA881X_TEMP_RETRY 3
+
 /*
  * wsa881x_get_temp - get wsa temperature
  * @thermal: thermal zone device

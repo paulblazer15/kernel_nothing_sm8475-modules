@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/device.h>
@@ -303,6 +304,7 @@ static int hap_enable_swr_dac_port(struct snd_soc_dapm_widget *w,
 		if (rc < 0) {
 			dev_err(swr_hap->dev, "%s: Enable hpwr_vreg failed, rc=%d\n",
 					__func__, rc);
+			swr_device_wakeup_unvote(swr_hap->swr_slave);
 			return rc;
 		}
 
@@ -317,16 +319,20 @@ static int hap_enable_swr_dac_port(struct snd_soc_dapm_widget *w,
 			swr_slvdev_datapath_control(swr_hap->swr_slave,
 					swr_hap->swr_slave->dev_num, false);
 			swr_hap_disable_hpwr_vreg(swr_hap);
+			swr_device_wakeup_unvote(swr_hap->swr_slave);
 			return rc;
 		}
+		swr_device_wakeup_unvote(swr_hap->swr_slave);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
+		swr_device_wakeup_vote(swr_hap->swr_slave);
 		/* stop SWR play */
 		val = 0;
 		rc = regmap_write(swr_hap->regmap, SWR_PLAY_REG, val);
 		if (rc) {
 			dev_err(swr_hap->dev, "%s: Enable SWR_PLAY failed, rc=%d\n",
 					__func__, rc);
+			swr_device_wakeup_unvote(swr_hap->swr_slave);
 			return rc;
 		}
 
@@ -334,6 +340,7 @@ static int hap_enable_swr_dac_port(struct snd_soc_dapm_widget *w,
 		if (rc < 0) {
 			dev_err(swr_hap->dev, "%s: Disable hpwr_vreg failed, rc=%d\n",
 					__func__, rc);
+			swr_device_wakeup_unvote(swr_hap->swr_slave);
 			return rc;
 		}
 		break;
@@ -664,7 +671,6 @@ static int swr_haptics_suspend(struct device *dev)
 		dev_err(dev, "%s: no data for swr_hap\n", __func__);
 		return -ENODEV;
 	}
-	trace_printk("%s: suspended\n", __func__);
 
 	return rc;
 }
@@ -679,7 +685,6 @@ static int swr_haptics_resume(struct device *dev)
 		dev_err(dev, "%s: no data for swr_hap\n", __func__);
 		return -ENODEV;
 	}
-	trace_printk("%s: resumed\n", __func__);
 
 	return rc;
 }
