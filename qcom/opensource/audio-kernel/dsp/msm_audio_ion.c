@@ -28,7 +28,6 @@
 #endif
 #include <dsp/msm_audio_ion.h>
 #include <linux/msm_audio.h>
-#include <linux/firmware/qcom/qcom_scm.h>
 #include <soc/qcom/secure_buffer.h>
 
 MODULE_IMPORT_NS(DMA_BUF);
@@ -616,13 +615,15 @@ static int msm_audio_ion_free(struct dma_buf *dma_buf, struct msm_audio_ion_priv
 static int msm_audio_hyp_unassign(struct msm_audio_fd_data *msm_audio_fd_data)
 {
 	int ret = 0;
-	u64 src_vmid_unmap_list = BIT(VMID_LPASS) | BIT(VMID_ADSP_HEAP);
-	struct qcom_scm_vmperm dst_vmids_unmap[] = {{QCOM_SCM_VMID_HLOS,
-		PERM_READ | PERM_WRITE | PERM_EXEC}};
+	u32 source_vm_unmap[] = {VMID_LPASS, VMID_ADSP_HEAP};
+	u32 dest_vm_unmap[] = {VMID_HLOS};
+	u32 dest_perms_unmap[] = {PERM_READ | PERM_WRITE | PERM_EXEC};
 
 	if (msm_audio_fd_data->hyp_assign) {
-		ret = qcom_scm_assign_mem(msm_audio_fd_data->paddr, msm_audio_fd_data->plen,
-			&src_vmid_unmap_list, dst_vmids_unmap, ARRAY_SIZE(dst_vmids_unmap));
+		ret = hyp_assign_phys(msm_audio_fd_data->paddr,
+			msm_audio_fd_data->plen, source_vm_unmap,
+			ARRAY_SIZE(source_vm_unmap), dest_vm_unmap,
+			dest_perms_unmap, ARRAY_SIZE(dest_vm_unmap));
 		if (ret < 0) {
 			pr_err("%s: qcom assign unmap failed result = %d addr = 0x%llx size = %zu\n",
 			__func__, ret, msm_audio_fd_data->paddr, msm_audio_fd_data->plen);
@@ -712,12 +713,13 @@ static long msm_audio_ion_ioctl(struct file *file, unsigned int ioctl_num,
 	size_t pa_len = 0;
 	struct iosys_map *iosys_vmap = NULL;
 	int ret = 0;
-	u64 src_vmid_map_list = BIT(QCOM_SCM_VMID_HLOS);
-	struct qcom_scm_vmperm dst_vmids_map[] = {{VMID_LPASS, PERM_READ | PERM_WRITE},
-		{VMID_ADSP_HEAP, PERM_READ | PERM_WRITE}};
-	u64 src_vmid_unmap_list = BIT(VMID_LPASS) | BIT(VMID_ADSP_HEAP);
-	struct qcom_scm_vmperm dst_vmids_unmap[] = {{QCOM_SCM_VMID_HLOS,
-		PERM_READ | PERM_WRITE | PERM_EXEC}};
+	u32 source_vm_map[] = {VMID_HLOS};
+	u32 dest_vm_map[] = {VMID_LPASS, VMID_ADSP_HEAP};
+	u32 dest_perms_map[] = {PERM_READ | PERM_WRITE,
+				PERM_READ | PERM_WRITE};
+	u32 source_vm_unmap[] = {VMID_LPASS, VMID_ADSP_HEAP};
+	u32 dest_vm_unmap[] = {VMID_HLOS};
+	u32 dest_perms_unmap[] = {PERM_READ | PERM_WRITE | PERM_EXEC};
 	struct msm_audio_fd_data *msm_audio_fd_data = NULL;
 	struct msm_audio_ion_private *ion_data =
 			container_of(file->f_inode->i_cdev, struct msm_audio_ion_private, cdev);
@@ -768,8 +770,9 @@ static long msm_audio_ion_ioctl(struct file *file, unsigned int ioctl_num,
 			pr_err("%s get phys addr failed %d\n", __func__, ret);
 			return ret;
 		}
-		ret = qcom_scm_assign_mem(paddr, pa_len, &src_vmid_map_list,
-		                      dst_vmids_map, ARRAY_SIZE(dst_vmids_map));
+		ret = hyp_assign_phys(paddr, pa_len, source_vm_map,
+				      ARRAY_SIZE(source_vm_map), dest_vm_map,
+				      dest_perms_map, ARRAY_SIZE(dest_vm_map));
 		if (ret < 0) {
 			pr_err("%s: qcom_assign failed result = %d addr = 0x%llx size = %lu\n",
 					__func__, ret, paddr, pa_len);
@@ -784,8 +787,10 @@ static long msm_audio_ion_ioctl(struct file *file, unsigned int ioctl_num,
 			pr_err("%s get phys addr failed %d\n", __func__, ret);
 			return ret;
 		}
-		ret = qcom_scm_assign_mem(paddr, pa_len, &src_vmid_unmap_list,
-		                      dst_vmids_unmap, ARRAY_SIZE(dst_vmids_unmap));
+		ret = hyp_assign_phys(paddr, pa_len, source_vm_unmap,
+				      ARRAY_SIZE(source_vm_unmap), dest_vm_unmap,
+				      dest_perms_unmap,
+				      ARRAY_SIZE(dest_vm_unmap));
 		if (ret < 0) {
 			pr_err("%s: qcom scm unassign failed result = %d addr = 0x%llx size = %lu\n",
 					__func__, ret, paddr, pa_len);
@@ -829,7 +834,7 @@ static int msm_audio_ion_reg_chrdev(struct msm_audio_ion_private *ion_data)
 		return ret;
 	}
 	pr_debug("%s major number %d", __func__, MAJOR(ion_data->ion_major));
-	ion_data->ion_class = class_create(ion_data->driver_name);
+	ion_data->ion_class = class_create(THIS_MODULE, ion_data->driver_name);
 	if (IS_ERR(ion_data->ion_class)) {
 		ret = PTR_ERR(ion_data->ion_class);
 		pr_err("%s class create failed. ret : %d", __func__, ret);
