@@ -7718,7 +7718,7 @@ static void ipa3_register_panic_hdlr(void)
 		&ipa3_panic_blk);
 }
 
-static void ipa3_unregister_panic_hdlr(void)
+static void __maybe_unused ipa3_unregister_panic_hdlr(void)
 {
 	atomic_notifier_chain_unregister(&panic_notifier_list,
 		&ipa3_panic_blk);
@@ -8755,6 +8755,8 @@ static ssize_t ipa3_write(struct file *file, const char __user *buf,
 
 	/* Check MHI configuration on MDM devices */
 	if (ipa3_ctx->platform_type == IPA_PLAT_TYPE_MDM) {
+		if (strnstr(dbg_buff, "double-vlan", strlen(dbg_buff)))
+			ipa3_ctx->is_eth_double_vlan_mode = true;
 
 		if (strnstr(dbg_buff, "vlan", strlen(dbg_buff))) {
 			if (strnstr(dbg_buff, STR_ETH_IFACE, strlen(dbg_buff)))
@@ -9922,6 +9924,7 @@ static int ipa3_pre_init(const struct ipa3_plat_drv_res *resource_p,
 	mutex_init(&ipa3_ctx->ssr_lock);
 	ipa3_ctx->is_modem_up = false;
 	ipa3_ctx->mhi_ctrl_state = IPA_MHI_CTRL_NOT_SETUP;
+	ipa3_ctx->is_mhi_coal_set = false;
 
 #if IS_ENABLED(CONFIG_QCOM_VA_MINIDUMP)
 	result = qcom_va_md_register("ipa_mini", &qcom_va_md_ipa_notif_blk);

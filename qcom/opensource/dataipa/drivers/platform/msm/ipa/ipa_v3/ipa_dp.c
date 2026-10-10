@@ -1476,6 +1476,7 @@ int ipa_setup_sys_pipe(struct ipa_sys_connect_params *sys_in, u32 *clnt_hdl)
 	struct ipa_ep_cfg ep_cfg_copy;
 	int (*tx_completion_func)(struct napi_struct *, int);
 	int pool_capacity = 0;
+	int temp_pool_capacity;
 
 	if (sys_in == NULL || clnt_hdl == NULL) {
 		IPAERR(
@@ -1819,7 +1820,7 @@ int ipa_setup_sys_pipe(struct ipa_sys_connect_params *sys_in, u32 *clnt_hdl)
 				sys_in->client == IPA_CLIENT_APPS_WAN_CONS) {
 				pool_capacity =
 					rmnet_mem_get_pool_size(ep->sys->page_order);
-				int temp_pool_capacity = (pool_capacity > 0) ?
+				temp_pool_capacity = (pool_capacity > 0) ?
 					pool_capacity : (ep->sys->repl->capacity / 2);
 				atomic_set(&ipa3_ctx->ipa_temp_pool_capacity, temp_pool_capacity);
 				IPADBG("Temp pool capacity for client:%d, value:%u\n",

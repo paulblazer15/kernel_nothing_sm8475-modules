@@ -31,12 +31,12 @@ struct rmnet_ctl_client_if {
 		       const void *data, unsigned int len);
 };
 
-#ifdef CONFIG_RMNET_LA_PLATFORM
+#if defined(CONFIG_RMNET_LA_PLATFORM) || defined(RMNET_LA_PLATFORM)
 struct rmnet_ctl_client_if *rmnet_ctl_if(void);
 int rmnet_ctl_get_stats(u64 *s, int n);
 #else
 static inline struct rmnet_ctl_client_if *rmnet_ctl_if(void) {return NULL;};
 static inline int rmnet_ctl_get_stats(u64 *s, int n) {return 0;};
-#endif /* CONFIG_RMNET_LA_PLATFORM */
+#endif /* CONFIG_RMNET_LA_PLATFORM || RMNET_LA_PLATFORM */
 
 #endif /* _RMNET_CTL_H_ */

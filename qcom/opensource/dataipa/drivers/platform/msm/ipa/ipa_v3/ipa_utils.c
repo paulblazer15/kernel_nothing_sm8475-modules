@@ -14139,6 +14139,37 @@ int ipa_send_mhi_endp_ind_to_modem(void)
 	return ipa3_qmi_send_endp_desc_indication(&req);
 }
 
+#ifdef IPA_CLIENT_MHI_COAL_CONS
+int ipa_send_mhi_coal_endp_ind_to_modem(bool check_if_modem_is_up)
+{
+	struct ipa_endp_desc_indication_msg_v01 req;
+	struct ipa_ep_id_type_v01 *ep_info;
+	int ipa_mhi_coal_ep_idx =
+		ipa_get_ep_mapping(IPA_CLIENT_MHI_COAL_CONS);
+
+	mutex_lock(&ipa3_ctx->lock);
+	if ((check_if_modem_is_up && !ipa3_ctx->is_modem_up) ||
+		!ipa3_ctx->is_mhi_coal_set) {
+		mutex_unlock(&ipa3_ctx->lock);
+		return 0;
+	}
+	mutex_unlock(&ipa3_ctx->lock);
+
+	memset(&req, 0, sizeof(req));
+	req.ep_info_len = 1;
+	req.ep_info_valid = true;
+	req.num_eps_valid = true;
+	req.num_eps = 1;
+	ep_info = &req.ep_info[0];
+	ep_info->ep_id = ipa_mhi_coal_ep_idx;
+	ep_info->ic_type = DATA_IC_TYPE_MHI_V01;
+	ep_info->ep_type = DATA_EP_DESC_TYPE_RSC_PROD_V01;
+	ep_info->ep_status = DATA_EP_STATUS_CONNECTED_V01;
+	return ipa3_qmi_send_endp_desc_indication(&req);
+}
+EXPORT_SYMBOL(ipa_send_mhi_coal_endp_ind_to_modem);
+#endif
+
 void ipa3_update_mhi_ctrl_state(u8 state, bool set)
 {
 	mutex_lock(&ipa3_ctx->lock);

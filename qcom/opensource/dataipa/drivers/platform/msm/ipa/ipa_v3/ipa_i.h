@@ -2510,6 +2510,7 @@ struct ipa3_context {
 	int num_ipa_cne_evt_req;
 	struct mutex ipa_cne_evt_lock;
 	bool vlan_mode_iface[IPA_VLAN_IF_MAX];
+	bool is_eth_double_vlan_mode;
 	bool wdi_over_pcie;
 	u32 entire_ipa_block_size;
 	bool do_register_collection_on_crash;
@@ -2612,6 +2613,7 @@ struct ipa3_context {
 	bool buff_below_thresh_for_ll_pipe_notified;
 	bool free_page_task_scheduled;
 	u8 mhi_ctrl_state;
+	bool is_mhi_coal_set;
 	struct ipa_mem_buffer uc_act_tbl;
 	bool uc_act_tbl_valid;
 	struct mutex act_tbl_lock;
@@ -3161,6 +3163,8 @@ int ipa_flt_sram_set_client_prio_high(enum ipa_client_type client);
 /*
  * NAT
  */
+struct ipa_ioc_coal_evict_policy;
+
 int ipa3_nat_ipv6ct_init_devices(void);
 void ipa3_nat_ipv6ct_destroy_devices(void);
 
@@ -3831,6 +3835,9 @@ int ipa3_send_eogre_info(
 void ipa3_update_mhi_ctrl_state(u8 state, bool set);
 /* Send MHI endpoint info to modem using QMI indication message */
 int ipa_send_mhi_endp_ind_to_modem(void);
+#ifdef IPA_CLIENT_MHI_COAL_CONS
+int ipa_send_mhi_coal_endp_ind_to_modem(bool check_if_modem_is_up);
+#endif
 
 /*
  * To pass macsec mapping to the IPACM
