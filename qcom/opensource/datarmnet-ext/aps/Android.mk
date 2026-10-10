@@ -1,11 +1,18 @@
+ifeq ($(TARGET_DATARMNET_EXT_ENABLE), true)
 ifneq ($(TARGET_BOARD_AUTO),true)
 ifneq ($(TARGET_BOARD_PLATFORM),qssi)
 
-RMNET_APS_DLKM_PLATFORMS_LIST := taro
+RMNET_APS_DLKM_PLATFORMS_LIST := pineapple
+RMNET_APS_DLKM_PLATFORMS_LIST += sun
 RMNET_APS_DLKM_PLATFORMS_LIST += parrot
+RMNET_APS_DLKM_PLATFORMS_LIST += tuna
+RMNET_APS_DLKM_PLATFORMS_LIST += taro
 
 ifeq ($(call is-board-platform-in-list, $(RMNET_APS_DLKM_PLATFORMS_LIST)),true)
 LOCAL_PATH := $(call my-dir)
+
+#Enabling BAZEL
+LOCAL_MODULE_DDK_BUILD := true
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := rmnet_aps.ko
@@ -32,3 +39,4 @@ include $(DLKM_DIR)/Build_external_kernelmodule.mk
 endif #End of check for target
 endif #End of Check for qssi target
 endif #End of check for AUTO Target
+endif #End of Check for datarmnet
