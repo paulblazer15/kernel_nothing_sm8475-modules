@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/module.h>
@@ -15,7 +16,6 @@
 #include <linux/workqueue.h>
 #include <linux/genalloc.h>
 #include <linux/debugfs.h>
-#include <linux/dma-iommu.h>
 
 #include <soc/qcom/secure_buffer.h>
 
@@ -1526,11 +1526,11 @@ int cam_smmu_alloc_firmware(int32_t smmu_hdl,
 	 * But on chipsets which use dma-coherent - all the buffers that are
 	 * being mapped to this CB must be CACHED
 	 */
-	rc = iommu_map(domain,
-		firmware_start,
-		(phys_addr_t) icp_fw.fw_hdl,
-		firmware_len,
-		IOMMU_READ|IOMMU_WRITE|IOMMU_PRIV);
+	rc = cam_iommu_map(domain,
+	firmware_start,
+	(phys_addr_t) icp_fw.fw_hdl,
+	firmware_len,
+	IOMMU_READ|IOMMU_WRITE|IOMMU_PRIV);
 
 	if (rc) {
 		CAM_ERR(CAM_SMMU, "Failed to map FW into IOMMU");
@@ -1674,7 +1674,7 @@ int cam_smmu_alloc_qdss(int32_t smmu_hdl,
 	 * But on chipsets which use dma-coherent - all the buffers that are
 	 * being mapped to this CB must be CACHED
 	 */
-	rc = iommu_map(domain,
+	rc = cam_iommu_map(domain,
 		qdss_start,
 		qdss_phy_addr,
 		qdss_len,
@@ -1984,7 +1984,7 @@ int cam_smmu_reserve_buf_region(enum cam_smmu_region_id region,
 		goto err_put;
 	}
 
-	buf_info->table = dma_buf_map_attachment(buf_info->attach,
+	buf_info->table = cam_compat_dmabuf_map_attach(buf_info->attach,
 		DMA_BIDIRECTIONAL);
 	if (IS_ERR_OR_NULL(buf_info->table)) {
 		rc = PTR_ERR(buf_info->table);
@@ -1996,27 +1996,28 @@ int cam_smmu_reserve_buf_region(enum cam_smmu_region_id region,
 	if (iommu_cb_set.force_cache_allocs)
 		prot |= IOMMU_CACHE;
 
-	size = iommu_map_sg(cb_info->domain,
+	size = cam_iommu_map_sg(cb_info->domain,
 		region_info->iova_start,
 		buf_info->table->sgl,
 		buf_info->table->orig_nents,
 		prot);
-	if (size != region_info->iova_len) {
+	if (region_info->iova_len < size) {
 		CAM_ERR(CAM_SMMU,
-			"IOMMU mapping failed size=%zu, iova_len=%zu",
+			"IOMMU mapping failed for size=%zu available iova_len=%zu",
 			size, region_info->iova_len);
 		goto err_unmap_sg;
 	}
 
 	*is_buf_allocated = true;
 	*iova = (uint32_t)region_info->iova_start;
-	*request_len = region_info->iova_len;
+	/* Assign size mapped */
+	*request_len = size;
 	mutex_unlock(&cb_info->lock);
 
 	return rc;
 
 err_unmap_sg:
-	dma_buf_unmap_attachment(buf_info->attach,
+	cam_compat_dmabuf_unmap_attach(buf_info->attach,
 		buf_info->table,
 		DMA_BIDIRECTIONAL);
 err_detach:
@@ -2097,7 +2098,7 @@ int cam_smmu_release_buf_region(enum cam_smmu_region_id region,
 			region_info->iova_len);
 	}
 
-	dma_buf_unmap_attachment(buf_info->attach,
+	cam_compat_dmabuf_unmap_attach(buf_info->attach,
 		buf_info->table, DMA_BIDIRECTIONAL);
 	dma_buf_detach(buf_info->buf, buf_info->attach);
 	dma_buf_put(buf_info->buf);
@@ -2147,7 +2148,7 @@ static int cam_smmu_map_buffer_validate(struct dma_buf *buf,
 	}
 
 	if (region_id == CAM_SMMU_REGION_SHARED) {
-		table = dma_buf_map_attachment(attach, dma_dir);
+		table = cam_compat_dmabuf_map_attach(attach, dma_dir);
 		if (IS_ERR_OR_NULL(table)) {
 			rc = PTR_ERR(table);
 			CAM_ERR(CAM_SMMU, "Error: dma map attachment failed");
@@ -2174,7 +2175,7 @@ static int cam_smmu_map_buffer_validate(struct dma_buf *buf,
 		if (iommu_cb_set.force_cache_allocs)
 			prot |= IOMMU_CACHE;
 
-		size = iommu_map_sg(domain, iova, table->sgl, table->orig_nents,
+		size = cam_iommu_map_sg(domain, iova, table->sgl, table->orig_nents,
 				prot);
 
 		if (size < 0) {
@@ -2197,7 +2198,7 @@ static int cam_smmu_map_buffer_validate(struct dma_buf *buf,
 		if (!dis_delayed_unmap)
 			attach->dma_map_attrs |= DMA_ATTR_DELAYED_UNMAP;
 
-		table = dma_buf_map_attachment(attach, dma_dir);
+		table = cam_compat_dmabuf_map_attach(attach, dma_dir);
 		if (IS_ERR_OR_NULL(table)) {
 			rc = PTR_ERR(table);
 			CAM_ERR(CAM_SMMU,
@@ -2272,7 +2273,7 @@ static int cam_smmu_map_buffer_validate(struct dma_buf *buf,
 
 	/* Unmap the mapping in dma region as this is not used anyway */
 	if (region_id == CAM_SMMU_REGION_SHARED)
-		dma_buf_unmap_attachment(attach, table, dma_dir);
+		cam_compat_dmabuf_unmap_attach(attach, table, dma_dir);
 
 	return 0;
 
@@ -2287,7 +2288,7 @@ err_alloc:
 			*len_ptr);
 	}
 err_unmap_sg:
-	dma_buf_unmap_attachment(attach, table, dma_dir);
+	cam_compat_dmabuf_unmap_attach(attach, table, dma_dir);
 err_detach:
 	dma_buf_detach(buf, attach);
 err_out:
@@ -2426,7 +2427,7 @@ static int cam_smmu_unmap_buf_and_remove_from_list(
 			mapping_info->attach->dma_map_attrs |=
 				DMA_ATTR_SKIP_CPU_SYNC;
 
-		dma_buf_unmap_attachment(mapping_info->attach,
+		cam_compat_dmabuf_unmap_attach(mapping_info->attach,
 			mapping_info->table, mapping_info->dir);
 		iommu_cb_set.cb_info[idx].io_mapping_size -= mapping_info->len;
 	}
@@ -2688,7 +2689,7 @@ static int cam_smmu_alloc_scratch_buffer_add_to_list(int idx,
 	if (iommu_cb_set.force_cache_allocs)
 		iommu_dir |= IOMMU_CACHE;
 
-	if (iommu_map_sg(domain,
+	if (cam_iommu_map_sg(domain,
 		iova,
 		table->sgl,
 		table->nents,
@@ -2972,7 +2973,7 @@ static int cam_smmu_map_stage2_buffer_and_add_to_list(int idx, int ion_fd,
 
 	attach->dma_map_attrs |= DMA_ATTR_SKIP_CPU_SYNC;
 
-	table = dma_buf_map_attachment(attach, dma_dir);
+	table = cam_compat_dmabuf_map_attach(attach, dma_dir);
 	if (IS_ERR_OR_NULL(table)) {
 		CAM_ERR(CAM_SMMU, "Error: dma buf map attachment failed");
 		rc = PTR_ERR(table);
@@ -3011,7 +3012,7 @@ static int cam_smmu_map_stage2_buffer_and_add_to_list(int idx, int ion_fd,
 	return 0;
 
 err_unmap_sg:
-	dma_buf_unmap_attachment(attach, table, dma_dir);
+	cam_compat_dmabuf_unmap_attach(attach, table, dma_dir);
 err_detach:
 	dma_buf_detach(dmabuf, attach);
 err_out:
@@ -3111,7 +3112,7 @@ static int cam_smmu_secure_unmap_buf_and_remove_from_list(
 	mapping_info->attach->dma_map_attrs |= DMA_ATTR_SKIP_CPU_SYNC;
 
 	/* iommu buffer clean up */
-	dma_buf_unmap_attachment(mapping_info->attach,
+	cam_compat_dmabuf_unmap_attach(mapping_info->attach,
 		mapping_info->table, mapping_info->dir);
 	dma_buf_detach(mapping_info->buf, mapping_info->attach);
 	mapping_info->buf = NULL;

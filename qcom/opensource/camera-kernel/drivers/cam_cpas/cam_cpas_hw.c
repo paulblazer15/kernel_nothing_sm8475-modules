@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/device.h>
@@ -270,9 +270,12 @@ static int cam_cpas_util_register_bus_client(
 	struct cam_cpas_bus_client *bus_client)
 {
 	int rc = 0;
+	struct cam_cpas_private_soc *soc_private =
+		(struct cam_cpas_private_soc *) soc_info->soc_private;
 
 	rc = cam_soc_bus_client_register(soc_info->pdev, dev_node,
-		&bus_client->soc_bus_client, &bus_client->common_data);
+		&bus_client->soc_bus_client, &bus_client->common_data,
+		soc_private->use_cam_icc_path_str);
 	if (rc) {
 		CAM_ERR(CAM_CPAS, "Bus client: %s registertion failed ,rc: %d",
 			bus_client->common_data.name, rc);
