@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2019-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022,2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _CAM_TFE_CSID_HW_INTF_H_
@@ -90,6 +90,7 @@ struct cam_isp_tfe_in_port_generic_info {
 	uint32_t                        rdi_count;
 	uint32_t                        secure_mode;
 	struct cam_isp_tfe_out_port_generic_info    *data;
+	bool                            epd_supported;
 };
 
 /**

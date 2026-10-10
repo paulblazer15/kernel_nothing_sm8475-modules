@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/iopoll.h>
@@ -1015,7 +1015,7 @@ static int cam_ife_csid_ver2_rx_err_bottom_half(
 		for (i = 0; i < 4; i++) {
 			/* NOTE: Hardware specific bits */
 			if (irq_status & (IFE_CSID_VER2_RX_LANE0_FIFO_OVERFLOW << i)) {
-				tmp_len += scnprintf(tmp_buf + tmp_len, 10 - tmp_len, " %d", i);
+				tmp_len += scnprintf(tmp_buf + tmp_len, 10 - tmp_len, " %zu", i);
 				lane_overflow = true;
 			}
 		}
@@ -2355,6 +2355,7 @@ static int cam_ife_csid_hw_ver2_config_rx(
 	case CAM_ISP_IFE_IN_RES_TPG:
 		csid_hw->rx_cfg.phy_sel = 0;
 		csid_hw->rx_cfg.tpg_mux_sel = 0;
+		fallthrough;
 	case CAM_ISP_IFE_IN_RES_CPHY_TPG_0:
 		csid_hw->rx_cfg.tpg_mux_sel = 1;
 		csid_hw->rx_cfg.tpg_num_sel = 1;
@@ -4601,6 +4602,7 @@ static int cam_ife_csid_ver2_top_cfg(
 
 	case CAM_IFE_CSID_INPUT_CORE_SFE:
 		csid_hw->top_cfg.out_ife_en = false;
+		fallthrough;
 	case CAM_IFE_CSID_INPUT_CORE_SFE_IFE:
 
 		if (top_args->core_idx == 0) {

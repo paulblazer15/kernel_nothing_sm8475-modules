@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/ratelimit.h>
@@ -1022,6 +1022,7 @@ static enum cam_vfe_bus_packer_format
 	case CAM_FORMAT_NV21:
 		if ((wm_index == 4) || (wm_index == 6) || (wm_index == 21))
 			return PACKER_FMT_PLAIN_8_LSB_MSB_10_ODD_EVEN;
+		fallthrough;
 	case CAM_FORMAT_NV12:
 	case CAM_FORMAT_UBWC_NV12:
 	case CAM_FORMAT_UBWC_NV12_4R:
@@ -1062,6 +1063,7 @@ static enum cam_vfe_bus_packer_format
 	default:
 		return PACKER_FMT_MAX;
 	}
+	return PACKER_FMT_MAX;
 }
 
 static int cam_vfe_bus_acquire_wm(
@@ -1182,6 +1184,7 @@ static int cam_vfe_bus_acquire_wm(
 		case CAM_FORMAT_UBWC_NV12:
 			rsrc_data->en_ubwc = 1;
 			/* Fall through for NV12 */
+		fallthrough;
 		case CAM_FORMAT_NV21:
 		case CAM_FORMAT_NV12:
 		case CAM_FORMAT_Y_ONLY:
@@ -3727,7 +3730,7 @@ static int cam_vfe_bus_update_stripe_cfg(void *priv, void *cmd_args,
 	for (i = 0; i < vfe_out_data->num_wm; i++) {
 		wm_data = vfe_out_data->wm_res[i]->res_priv;
 		stripe_config = (struct cam_isp_dual_stripe_config  *)
-			&stripe_args->dual_cfg->stripes[ports_plane_idx + i];
+			&stripe_args->dual_cfg->stripes_flex[ports_plane_idx + i];
 		wm_data->width = stripe_config->width;
 		wm_data->offset = stripe_config->offset;
 		wm_data->tile_cfg = stripe_config->tileconfig;
