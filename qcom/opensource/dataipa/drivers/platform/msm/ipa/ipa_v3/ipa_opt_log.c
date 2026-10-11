@@ -74,6 +74,8 @@ int ipa3_send_opt_log_msg(const char *input_string)
 
 	return 0;
 }
+EXPORT_SYMBOL(ipa3_send_opt_log_msg);
+
 static int ipa_opt_log_open(struct inode *inode, struct file *filp)
 {
 	int ret = 0;

@@ -167,11 +167,10 @@ static bool ipa_wdi_is_tx1_used_internal(void)
 	return 0;
 }
 
-bool ipa_wdi_opt_dpath_ctrl_enabled(ipa_wdi_hdl_t hdl)
+static bool ipa_wdi_opt_dpath_ctrl_enabled_internal(ipa_wdi_hdl_t hdl)
 {
 	return atomic_read(&opt_dpath_info[hdl].is_ctrl_cb_registered);
 }
-EXPORT_SYMBOL(ipa_wdi_opt_dpath_ctrl_enabled);
 
 static void ipa_wdi_pm_cb(void *p, enum ipa_pm_cb_event event)
 {
@@ -1277,7 +1276,7 @@ EXPORT_SYMBOL(ipa_wdi_opt_dpath_notify_flt_rlsd_per_inst);
  *
  *
  */
-int ipa_wdi_opt_dpath_rsrv_filter_req(
+static int ipa_wdi_opt_dpath_rsrv_filter_req_internal(
 		struct ipa_wlan_opt_dp_rsrv_filter_req_msg_v01 *req,
 		struct ipa_wlan_opt_dp_rsrv_filter_resp_msg_v01 *resp)
 {
@@ -1359,7 +1358,6 @@ int ipa_wdi_opt_dpath_rsrv_filter_req(
 	return ret;
 
 }
-EXPORT_SYMBOL(ipa_wdi_opt_dpath_rsrv_filter_req);
 
 
 /**
@@ -1372,7 +1370,7 @@ EXPORT_SYMBOL(ipa_wdi_opt_dpath_rsrv_filter_req);
  *
  */
 
-int ipa_wdi_opt_dpath_add_filter_req(
+static int ipa_wdi_opt_dpath_add_filter_req_internal(
 		struct ipa_wlan_opt_dp_add_filter_req_msg_v01 *req,
 		struct ipa_wlan_opt_dp_add_filter_complt_ind_msg_v01 *ind)
 {
@@ -1453,7 +1451,6 @@ int ipa_wdi_opt_dpath_add_filter_req(
 	return ret;
 
 }
-EXPORT_SYMBOL(ipa_wdi_opt_dpath_add_filter_req);
 
 /**
  * ipa_wdi_opt_dpath_remove_filter_req_internal() - Sends WLAN DP filter info
@@ -1465,7 +1462,7 @@ EXPORT_SYMBOL(ipa_wdi_opt_dpath_add_filter_req);
  *
  */
 
-int ipa_wdi_opt_dpath_remove_filter_req(
+static int ipa_wdi_opt_dpath_remove_filter_req_internal(
 			struct ipa_wlan_opt_dp_remove_filter_req_msg_v01 *req,
 			struct ipa_wlan_opt_dp_remove_filter_complt_ind_msg_v01 *ind)
 {
@@ -1500,7 +1497,6 @@ int ipa_wdi_opt_dpath_remove_filter_req(
 	return ret;
 
 }
-EXPORT_SYMBOL(ipa_wdi_opt_dpath_remove_filter_req);
 
 
 
@@ -1514,7 +1510,7 @@ EXPORT_SYMBOL(ipa_wdi_opt_dpath_remove_filter_req);
  *
  */
 
-int ipa_wdi_opt_dpath_remove_all_filter_req(
+static int ipa_wdi_opt_dpath_remove_all_filter_req_internal(
 			struct ipa_wlan_opt_dp_remove_all_filter_req_msg_v01 *req,
 			struct ipa_wlan_opt_dp_remove_all_filter_resp_msg_v01 *resp)
 {
@@ -1557,7 +1553,6 @@ int ipa_wdi_opt_dpath_remove_all_filter_req(
 	return ret;
 
 }
-EXPORT_SYMBOL(ipa_wdi_opt_dpath_remove_all_filter_req);
 
 /**
  * ipa_wdi_opt_dpath_wlan_ctrl_pkt_rcvd_req - Client should call this function to
@@ -1566,7 +1561,7 @@ EXPORT_SYMBOL(ipa_wdi_opt_dpath_remove_all_filter_req);
  *
  * @Return 0 on success, negative on failure
  */
-int ipa_wdi_opt_dpath_wlan_ctrl_pkt_rcvd_req(
+static int ipa_wdi_opt_dpath_wlan_ctrl_pkt_rcvd_req_internal(
 	struct ipa_wlan_opt_dp_wlan_ctrl_pkt_rcvd_req_msg_v01 *req)
 {
 	int ret = 0;
@@ -1607,7 +1602,7 @@ int ipa_wdi_opt_dpath_wlan_ctrl_pkt_rcvd_req(
  *
  */
 
-int ipa_wdi_opt_dpath_add_ctrl_filter_req(
+static int ipa_wdi_opt_dpath_add_ctrl_filter_req_internal(
 		struct ipa_wlan_opt_dp_add_filter_req_msg_v01 *req,
 		struct ipa_wlan_opt_dp_add_filter_complt_ind_msg_v01 *ind)
 {
@@ -1714,7 +1709,6 @@ int ipa_wdi_opt_dpath_add_ctrl_filter_req(
 
 	return resp;
 }
-EXPORT_SYMBOL(ipa_wdi_opt_dpath_add_ctrl_filter_req);
 
 int ipa_wdi_opt_dpath_notify_ctrl_flt_rem_per_inst(
 		ipa_wdi_hdl_t hdl,
@@ -1762,7 +1756,7 @@ EXPORT_SYMBOL(ipa_wdi_opt_dpath_notify_ctrl_flt_rem_per_inst);
  * Returns:	0 on success, negative on failure
  */
 
-int ipa_wdi_opt_dpath_remove_ctrl_filter_req(
+static int ipa_wdi_opt_dpath_remove_ctrl_filter_req_internal(
 			struct ipa_wlan_opt_dp_remove_filter_req_msg_v01 *req,
 			struct ipa_wlan_opt_dp_remove_filter_complt_ind_msg_v01 *ind)
 {
@@ -1799,7 +1793,6 @@ int ipa_wdi_opt_dpath_remove_ctrl_filter_req(
 
 	return (resp == IPA_WDI_OPT_DPATH_RESP_ERR_TIMEOUT ? -1 : 0);
 }
-EXPORT_SYMBOL(ipa_wdi_opt_dpath_remove_ctrl_filter_req);
 
 
 /**
@@ -1809,7 +1802,7 @@ EXPORT_SYMBOL(ipa_wdi_opt_dpath_remove_ctrl_filter_req);
  *
  * @Return 0 on success, negative on failure
  */
-int ipa_wdi_opt_dpath_remove_all_ctrl_filter_req(void)
+static int ipa_wdi_opt_dpath_remove_all_ctrl_filter_req_internal(void)
 {
 	int ret = 0;
 
@@ -1831,7 +1824,6 @@ int ipa_wdi_opt_dpath_remove_all_ctrl_filter_req(void)
 
 	return ret;
 }
-EXPORT_SYMBOL(ipa_wdi_opt_dpath_remove_all_ctrl_filter_req);
 
 /**
  * ipa_wdi_opt_dpath_enable_clk_per_inst - Client should call this function to
@@ -2348,8 +2340,10 @@ static int ipa_wdi_set_perf_profile_internal(struct ipa_wdi_perf_profile *profil
 }
 void ipa_wdi3_register(void)
 {
-	struct ipa_wdi3_data funcs;
+	struct ipa_wdi3_data funcs = { 0 };
 
+	funcs.ipa_wdi_opt_dpath_ctrl_enabled =
+		ipa_wdi_opt_dpath_ctrl_enabled_internal;
 	funcs.ipa_wdi_bw_monitor = ipa_uc_bw_monitor;
 	funcs.ipa_wdi_cleanup = ipa_wdi_cleanup_internal;
 	funcs.ipa_wdi_conn_pipes = ipa_wdi_conn_pipes_internal;
@@ -2378,6 +2372,23 @@ void ipa_wdi3_register(void)
 	funcs.ipa_wdi_set_perf_profile_per_inst = ipa_wdi_set_perf_profile_per_inst_internal;
 	funcs.ipa_wdi_create_smmu_mapping_per_inst = ipa_wdi_create_smmu_mapping_per_inst_internal;
 	funcs.ipa_wdi_release_smmu_mapping_per_inst = ipa_wdi_release_smmu_mapping_per_inst_internal;
+
+	funcs.ipa_wdi_opt_dpath_rsrv_filter_req =
+		ipa_wdi_opt_dpath_rsrv_filter_req_internal;
+	funcs.ipa_wdi_opt_dpath_add_filter_req =
+		ipa_wdi_opt_dpath_add_filter_req_internal;
+	funcs.ipa_wdi_opt_dpath_remove_filter_req =
+		ipa_wdi_opt_dpath_remove_filter_req_internal;
+	funcs.ipa_wdi_opt_dpath_remove_all_filter_req =
+		ipa_wdi_opt_dpath_remove_all_filter_req_internal;
+	funcs.ipa_wdi_opt_dpath_wlan_ctrl_pkt_rcvd_req =
+		ipa_wdi_opt_dpath_wlan_ctrl_pkt_rcvd_req_internal;
+	funcs.ipa_wdi_opt_dpath_add_ctrl_filter_req =
+		ipa_wdi_opt_dpath_add_ctrl_filter_req_internal;
+	funcs.ipa_wdi_opt_dpath_remove_ctrl_filter_req =
+		ipa_wdi_opt_dpath_remove_ctrl_filter_req_internal;
+	funcs.ipa_wdi_opt_dpath_remove_all_ctrl_filter_req =
+		ipa_wdi_opt_dpath_remove_all_ctrl_filter_req_internal;
 
 	if (ipa_fmwk_register_ipa_wdi3(&funcs))
 		pr_err("failed to register ipa_wdi3 APIs\n");

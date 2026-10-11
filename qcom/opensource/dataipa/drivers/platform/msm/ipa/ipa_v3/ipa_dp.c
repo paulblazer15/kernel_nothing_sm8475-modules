@@ -641,9 +641,6 @@ int ipa3_send(struct ipa3_sys_context *sys,
 	bool send_nop = false;
 	unsigned int max_desc;
 
-	if (unlikely(!in_atomic))
-		mem_flag = GFP_KERNEL;
-
 	gsi_ep_cfg = ipa3_get_gsi_ep_info(sys->ep->client);
 	if (unlikely(!gsi_ep_cfg)) {
 		IPAERR("failed to get gsi EP config for client=%d\n",
@@ -2452,7 +2449,9 @@ int ipa3_tx_dp(enum ipa_client_type dst, struct sk_buff *skb,
 		goto fail_pipe_not_valid;
 	}
 
-	trace_ipa3_tx_dp(skb,sys->ep->client);
+	if (skb->dev)
+		devname = skb->dev->name;
+	trace_ipa3_tx_dp(skb, devname, sys->ep->client);
 	num_frags = skb_shinfo(skb)->nr_frags;
 	/*
 	 * make sure TLV FIFO supports the needed frags.
@@ -4065,7 +4064,7 @@ begin:
 			if (skb && skb->dev)
 				devname = skb->dev->name;
 
-			trace_ipa_tx_dp(skb, devname, sys->ep->client);
+			trace_ipa3_tx_dp(skb, devname, sys->ep->client);
 		}
 		if (sys->status_stat) {
 			sys->status_stat->status[sys->status_stat->curr] =

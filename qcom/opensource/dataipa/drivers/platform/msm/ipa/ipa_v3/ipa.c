@@ -979,6 +979,7 @@ struct ipa_smmu_cb_ctx *ipa3_get_smmu_ctx(enum ipa_smmu_cb_type cb_type)
 {
 	return &smmu_cb[cb_type];
 }
+EXPORT_SYMBOL(ipa3_get_smmu_ctx);
 
 static int ipa3_open(struct inode *inode, struct file *filp)
 {
@@ -8232,6 +8233,7 @@ static int ipa3_post_init(const struct ipa3_plat_drv_res *resource_p,
 		}
 	}
 
+	/* Enable LAN RX NAPI once, before connecting the AP-IPA pipes. */
 	ipa3_enable_napi_lan_rx();
 	/* setup the AP-IPA pipes */
 	if (ipa3_setup_apps_pipes()) {
@@ -8330,7 +8332,6 @@ static int ipa3_post_init(const struct ipa3_plat_drv_res *resource_p,
 	if (ipa3_ctx->clients_registered)
 		reg = true;
 	mutex_unlock(&ipa3_ctx->lock);
-	ipa3_enable_napi_lan_rx();
 	if (reg) {
 		IPADBG("register to fmwk\n");
 		ipa3_register_to_fmwk();
@@ -8358,8 +8359,9 @@ static int ipa3_post_init(const struct ipa3_plat_drv_res *resource_p,
 	ipa_ssr_driver_dump_init();
 	ipa_ssr_driver_dump_register_region("ipa_ctx", ipa3_ctx,
 	 sizeof(struct ipa3_context));
-	ipa_ssr_driver_dump_register_region("ipc_logs", ipa3_ctx->logbuf,
-	((struct ipc_log_context *)(ipa3_ctx->logbuf))->write_avail);
+	if (ipa3_ctx->logbuf)
+		ipa_ssr_driver_dump_register_region("ipc_logs", ipa3_ctx->logbuf,
+			((struct ipc_log_context *)ipa3_ctx->logbuf)->write_avail);
 	ipa_ssr_driver_dump_register_region("gsi_ctx", gsi_ctx, sizeof(struct gsi_ctx));
 
 
@@ -8378,8 +8380,9 @@ static int ipa3_post_init(const struct ipa3_plat_drv_res *resource_p,
 
 fail_teth_bridge_driver_init:
 	ipa3_teardown_apps_pipes();
-fail_alloc_gsi_channel:
 fail_setup_apps_pipes:
+	ipa3_disable_napi_lan_rx();
+fail_alloc_gsi_channel:
 	gsi_deregister_device(ipa3_ctx->gsi_dev_hdl, false);
 fail_register_device:
 	ipa3_destroy_flt_tbl_idrs();
@@ -9853,12 +9856,6 @@ static int ipa3_pre_init(const struct ipa3_plat_drv_res *resource_p,
 		goto fail_ipa_dma_setup;
 	}
 
-	result = ipa3_usb_init();
-	if (result) {
-		IPAERR("Failed to setup USB\n");
-		result = -ENODEV;
-		goto fail_ipa_usb_setup;
-	}
 	/*
 	 * We can't register the GSI driver yet, as it expects
 	 * the GSI FW to be up and running before the registration.
@@ -9983,8 +9980,6 @@ fail_odl_init:
 	cdev_del(cdev);
 fail_cdev_add:
 fail_gsi_pre_fw_load_init:
-	ipa3_usb_exit();
-fail_ipa_usb_setup:
 	ipa3_dma_shutdown();
 fail_ipa_dma_setup:
 	ipa_pm_destroy();
@@ -12241,6 +12236,7 @@ int ipa3_iommu_map(struct iommu_domain *domain,
 
 	return iommu_map(domain, iova, paddr, size, prot);
 }
+EXPORT_SYMBOL(ipa3_iommu_map);
 
 /**
  * ipa3_get_smmu_params()- Return the ipa3 smmu related params.
