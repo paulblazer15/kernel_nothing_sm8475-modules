@@ -4204,6 +4204,9 @@ static uint8_t sme_get_nss_chain_shift(enum QDF_OPMODE device_mode)
 		return OCB_NSS_CHAINS_SHIFT;
 	case QDF_TDLS_MODE:
 		return TDLS_NSS_CHAINS_SHIFT;
+	case QDF_NDI_MODE:
+	case QDF_NAN_DISC_MODE:
+		return NAN_NSS_CHAIN_SHIFT;
 
 	default:
 		sme_err("Device mode %d invalid", device_mode);
