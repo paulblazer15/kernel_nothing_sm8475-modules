@@ -746,7 +746,7 @@ static int ipa_test_hw_stats_query_drop_stats(void *priv)
                goto fail;
 
        for (i = 0; i <= IPA_CLIENT_MAX; i++) {
-               ep_idx = ipa_get_ep_mapping(i);
+               ep_idx = ipa3_get_ep_mapping(i);
                if (ep_idx == -1 || !IPA_CLIENT_IS_CONS(i) || IPA_CLIENT_IS_TEST(i))
                        continue;
 
@@ -799,7 +799,7 @@ static int ipa_test_hw_stats_query_teth_stats(void *priv)
        }
 
        for (i = 0; i < IPA_CLIENT_MAX; i++) {
-               int ep_idx = ipa_get_ep_mapping(i);
+               int ep_idx = ipa3_get_ep_mapping(i);
 
                if (ep_idx == -1)
                        continue;
@@ -822,7 +822,7 @@ static int ipa_test_hw_stats_query_teth_stats(void *priv)
                }
 
                for (j = 0; j < IPA_CLIENT_MAX; j++) {
-                       int cons_idx = ipa_get_ep_mapping(j);
+                       int cons_idx = ipa3_get_ep_mapping(j);
 
                        if (cons_idx == -1)
                                continue;
@@ -899,7 +899,7 @@ static int ipa_test_hw_stats_query_quota_stats(void *priv)
        }
 
        for (i = 0; i < IPA_CLIENT_MAX; i++) {
-               ep_idx = ipa_get_ep_mapping(i);
+               ep_idx = ipa3_get_ep_mapping(i);
 
                if (ep_idx == -1)
                        continue;
@@ -1024,9 +1024,9 @@ static int ipa_test_hw_stats_set_bw(void *priv)
 	info->threshold[1] = 400;
 	info->threshold[2] = 600;
 
-	ret = ipa_uc_bw_monitor(info);
+	ret = ipa3_uc_bw_monitor(info);
 	if (ret < 0) {
-		IPA_UT_ERR("ipa_uc_bw_monitor fails\n");
+		IPA_UT_ERR("ipa3_uc_bw_monitor fails\n");
 		ret = -ENOMEM;
 	}
 

@@ -255,7 +255,7 @@ TRACE_EVENT(
 );
 
 TRACE_EVENT(
-	ipa_tx_dp,
+	ipa3_tx_dp,
 
 	TP_PROTO(const struct sk_buff *skb, const char *devname, unsigned long client),
 

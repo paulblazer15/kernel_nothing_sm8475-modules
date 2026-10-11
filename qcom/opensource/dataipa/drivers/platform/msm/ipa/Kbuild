@@ -44,16 +44,6 @@ ipam-$(CONFIG_RMNET_IPA3) += ipa_v3/rmnet_ipa.o ipa_v3/ipa_qmi_service_v01.o \
 	ipa_v3/ipa_qmi_service.o ipa_v3/rmnet_ctl_ipa.o \
 	ipa_v3/rmnet_ipa_fd_ioctl.o ipa_v3/rmnet_ll_ipa.o
 
-ipam-$(CONFIG_IPA_CLIENTS_MANAGER) += ipa_clients/ipa_usb.o \
-	ipa_clients/ipa_wdi3.o \
-	ipa_clients/ipa_gsb.o \
-	ipa_clients/ipa_uc_offload.o \
-	ipa_clients/ipa_wigig.o \
-	ipa_clients/ipa_mhi_client.o \
-	ipa_clients/ipa_eth.o
-
-ipam-$(CONFIG_RNDIS_IPA) += ipa_clients/rndis_ipa.o
-
 ipam-$(CONFIG_IPA3_MHI_PRIME_MANAGER) += ipa_v3/ipa_mpm.o
 
 ipam-$(CONFIG_IPA3_MHI_PROXY) += ipa_v3/ipa_mhi_proxy.o

@@ -18,7 +18,7 @@
 #include <linux/dma-mapping.h>	/* dma_alloc_coherent() */
 #include <linux/io.h>
 #include <linux/uaccess.h>
-#include "ipa.h"
+#include <linux/ipa.h>
 #include <linux/sched.h>
 #include <linux/skbuff.h>	/* sk_buff */
 #include <linux/kfifo.h>  /* Kernel FIFO Implementation */

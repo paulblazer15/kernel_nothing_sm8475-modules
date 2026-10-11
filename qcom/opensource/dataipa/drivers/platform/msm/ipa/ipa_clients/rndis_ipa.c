@@ -20,7 +20,7 @@
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
 #include <linux/sched.h>
-#include "ipa.h"
+#include <linux/ipa.h>
 #include <linux/random.h>
 #include <linux/workqueue.h>
 #include <linux/version.h>
@@ -1637,7 +1637,7 @@ static void rndis_ipa_xmit_error_aftercare_wq(struct work_struct *work)
  *  for IPA driver
  * eth_type: the Ethernet type for this header-insertion header
  * hdr_name: string that shall represent this header in IPA data base
- * add_hdr: output for caller to be used with ipa_add_hdr() to configure
+ * add_hdr: output for caller to be used with ipa3_add_hdr() to configure
  *  the IPA core
  * dst_mac: tethered PC MAC (Ethernet) address to be added to packets
  *  for IPA->USB pipe
@@ -1790,7 +1790,7 @@ static int rndis_ipa_hdrs_cfg(
 
 	hdrs->num_hdrs = 2;
 	hdrs->commit = 1;
-	result = ipa_add_hdr(hdrs);
+	result = ipa3_add_hdr(hdrs);
 	if (result) {
 		RNDIS_IPA_ERROR("Fail on Header-Insertion(%d)\n", result);
 		goto fail_add_hdr;
@@ -1845,9 +1845,9 @@ static int rndis_ipa_hdrs_destroy(struct rndis_ipa_dev *rndis_ipa_ctx)
 	ipv6 = &del_hdr->hdl[1];
 	ipv6->hdl = rndis_ipa_ctx->eth_ipv6_hdr_hdl;
 
-	result = ipa_del_hdr(del_hdr);
+	result = ipa3_del_hdr(del_hdr);
 	if (result || ipv4->status || ipv6->status)
-		RNDIS_IPA_ERROR("ipa_del_hdr failed\n");
+		RNDIS_IPA_ERROR("ipa3_del_hdr failed\n");
 	else
 		RNDIS_IPA_DEBUG("hdrs deletion done\n");
 
@@ -1931,7 +1931,7 @@ static int rndis_ipa_register_properties(char *netdev_name, bool is_vlan_mode)
 	rx_ipv6_property->hdr_l2_type = hdr_l2_type;
 	rx_properties.num_props = 2;
 
-	result = ipa_register_intf("rndis0", &tx_properties, &rx_properties);
+	result = ipa3_register_intf("rndis0", &tx_properties, &rx_properties);
 	if (result)
 		RNDIS_IPA_ERROR("fail on Tx/Rx properties registration\n");
 	else
@@ -1954,7 +1954,7 @@ static int  rndis_ipa_deregister_properties(char *netdev_name)
 
 	RNDIS_IPA_LOG_ENTRY();
 
-	result = ipa_deregister_intf(netdev_name);
+	result = ipa3_deregister_intf(netdev_name);
 	if (result) {
 		RNDIS_IPA_DEBUG("Fail on Tx prop deregister\n");
 		return result;
@@ -2567,7 +2567,7 @@ static ssize_t rndis_ipa_debugfs_atomic_read
 	return simple_read_from_buffer(ubuf, count, ppos, atomic_str, nbytes);
 }
 
-int rndis_ipa_init_module(void)
+static int __init rndis_ipa_init_module(void)
 {
 	ipa_rndis_logbuf = ipc_log_context_create(IPA_RNDIS_IPC_LOG_PAGES,
 		"ipa_rndis", MINIDUMP_MASK);
@@ -2577,9 +2577,8 @@ int rndis_ipa_init_module(void)
 	pr_info("RNDIS_IPA module is loaded.\n");
 	return 0;
 }
-EXPORT_SYMBOL(rndis_ipa_init_module);
 
-void rndis_ipa_cleanup_module(void)
+static void __exit rndis_ipa_cleanup_module(void)
 {
 	if (ipa_rndis_logbuf)
 		ipc_log_context_destroy(ipa_rndis_logbuf);
@@ -2587,10 +2586,9 @@ void rndis_ipa_cleanup_module(void)
 
 	pr_info("RNDIS_IPA module is unloaded.\n");
 }
-EXPORT_SYMBOL(rndis_ipa_cleanup_module);
 
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("RNDIS_IPA network interface");
 
-//late_initcall(rndis_ipa_init_module);
-//module_exit(rndis_ipa_cleanup_module);
+late_initcall(rndis_ipa_init_module);
+module_exit(rndis_ipa_cleanup_module);

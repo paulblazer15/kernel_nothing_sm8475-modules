@@ -3,11 +3,12 @@
  * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
  */
 
-#include "ipa_uc_offload.h"
+#include <linux/ipa_uc_offload.h>
 #include <linux/msm_ipa.h>
 #include <linux/if_vlan.h>
 #include "ipa_common_i.h"
 #include "ipa_pm.h"
+#include <linux/ipa_fmwk.h>
 
 #define IPA_NTN_DMA_POOL_ALIGNMENT 8
 #define OFFLOAD_DRV_NAME "ipa_uc_offload"
@@ -99,7 +100,7 @@ static int ipa_commit_partial_hdr(
 		hdr->hdr[i].eth2_ofst = hdr_info[i].dst_mac_addr_offset;
 	}
 
-	if (ipa_add_hdr(hdr)) {
+	if (ipa3_add_hdr(hdr)) {
 		IPA_UC_OFFLOAD_ERR("fail to add partial headers\n");
 		return -EFAULT;
 	}
@@ -272,7 +273,7 @@ static int ipa_uc_offload_ntn_reg_intf(
 		rx_prop[1].attrib.meta_data_mask = inp->meta_data_mask;
 	}
 
-	if (ipa_register_intf(inp->netdev_name, &tx, &rx)) {
+	if (ipa3_register_intf(inp->netdev_name, &tx, &rx)) {
 		IPA_UC_OFFLOAD_ERR("fail to add interface prop\n");
 		memset(ntn_ctx, 0, sizeof(*ntn_ctx));
 		ret = -EFAULT;
@@ -294,7 +295,7 @@ fail_alloc:
 	return ret;
 }
 
-int ipa_uc_offload_reg_intf(
+static int ipa_uc_offload_reg_intf_internal(
 	struct ipa_uc_offload_intf_params *inp,
 	struct ipa_uc_offload_out_params *outp)
 {
@@ -353,7 +354,6 @@ int ipa_uc_offload_reg_intf(
 
 	return ret;
 }
-EXPORT_SYMBOL(ipa_uc_offload_reg_intf);
 
 
 static int ipa_uc_ntn_alloc_conn_smmu_info(struct ipa_ntn_setup_info *dest,
@@ -465,7 +465,7 @@ fail:
 	return result;
 }
 
-int ipa_uc_offload_conn_pipes(struct ipa_uc_offload_conn_in_params *inp,
+static int ipa_uc_offload_conn_pipes_internal(struct ipa_uc_offload_conn_in_params *inp,
 			struct ipa_uc_offload_conn_out_params *outp)
 {
 	int ret = 0;
@@ -513,7 +513,6 @@ int ipa_uc_offload_conn_pipes(struct ipa_uc_offload_conn_in_params *inp,
 
 	return ret;
 }
-EXPORT_SYMBOL(ipa_uc_offload_conn_pipes);
 
 static int ipa_uc_ntn_disconn_pipes(struct ipa_uc_offload_ctx *ntn_ctx)
 {
@@ -555,7 +554,7 @@ static int ipa_uc_ntn_disconn_pipes(struct ipa_uc_offload_ctx *ntn_ctx)
 	return ret;
 }
 
-int ipa_uc_offload_disconn_pipes(u32 clnt_hdl)
+static int ipa_uc_offload_disconn_pipes_internal(u32 clnt_hdl)
 {
 	struct ipa_uc_offload_ctx *offload_ctx;
 	int ret = 0;
@@ -591,7 +590,6 @@ int ipa_uc_offload_disconn_pipes(u32 clnt_hdl)
 
 	return ret;
 }
-EXPORT_SYMBOL(ipa_uc_offload_disconn_pipes);
 
 static int ipa_uc_ntn_cleanup(struct ipa_uc_offload_ctx *ntn_ctx)
 {
@@ -610,13 +608,13 @@ static int ipa_uc_ntn_cleanup(struct ipa_uc_offload_ctx *ntn_ctx)
 	hdr->hdl[0].hdl = ntn_ctx->partial_hdr_hdl[0];
 	hdr->hdl[1].hdl = ntn_ctx->partial_hdr_hdl[1];
 
-	if (ipa_del_hdr(hdr)) {
+	if (ipa3_del_hdr(hdr)) {
 		IPA_UC_OFFLOAD_ERR("fail to delete partial header\n");
 		result = -EFAULT;
 		goto fail;
 	}
 
-	if (ipa_deregister_intf(ntn_ctx->netdev_name)) {
+	if (ipa3_deregister_intf(ntn_ctx->netdev_name)) {
 		IPA_UC_OFFLOAD_ERR("fail to delete interface prop\n");
 		result = -EFAULT;
 		goto fail;
@@ -627,7 +625,7 @@ fail:
 	return result;
 }
 
-int ipa_uc_offload_cleanup(u32 clnt_hdl)
+static int ipa_uc_offload_cleanup_internal(u32 clnt_hdl)
 {
 	struct ipa_uc_offload_ctx *offload_ctx;
 	int ret = 0;
@@ -673,7 +671,6 @@ int ipa_uc_offload_cleanup(u32 clnt_hdl)
 
 	return ret;
 }
-EXPORT_SYMBOL(ipa_uc_offload_cleanup);
 
 /**
  * ipa_uc_offload_uc_rdyCB() - To register uC ready CB if uC not
@@ -684,7 +681,7 @@ EXPORT_SYMBOL(ipa_uc_offload_cleanup);
  * Returns:	0 on success, negative on failure
  *
  */
-int ipa_uc_offload_reg_rdyCB(struct ipa_uc_ready_params *inp)
+int ipa_uc_offload_reg_rdyCB_internal(struct ipa_uc_ready_params *inp)
 {
 	int ret = 0;
 
@@ -704,16 +701,14 @@ int ipa_uc_offload_reg_rdyCB(struct ipa_uc_ready_params *inp)
 
 	return ret;
 }
-EXPORT_SYMBOL(ipa_uc_offload_reg_rdyCB);
 
-void ipa_uc_offload_dereg_rdyCB(enum ipa_uc_offload_proto proto)
+void ipa_uc_offload_dereg_rdyCB_internal(enum ipa_uc_offload_proto proto)
 {
 	if (proto == IPA_UC_NTN || proto == IPA_UC_NTN_V2X)
 		ipa3_ntn_uc_dereg_rdyCB();
 }
-EXPORT_SYMBOL(ipa_uc_offload_dereg_rdyCB);
 
-int ipa_set_perf_profile(struct ipa_perf_profile *profile)
+int ipa_set_perf_profile_internal(struct ipa_perf_profile *profile)
 {
 	if (!profile) {
 		IPA_UC_OFFLOAD_ERR("Invalid input\n");
@@ -735,4 +730,19 @@ int ipa_set_perf_profile(struct ipa_perf_profile *profile)
 		ipa_uc_offload_ctx[IPA_UC_NTN]->pm_hdl,
 		profile->max_supported_bw_mbps);
 }
-EXPORT_SYMBOL(ipa_set_perf_profile);
+void ipa_uc_offload_register(void)
+{
+	struct ipa_uc_offload_data funcs;
+
+	funcs.ipa_uc_offload_reg_intf = ipa_uc_offload_reg_intf_internal;
+	funcs.ipa_uc_offload_cleanup = ipa_uc_offload_cleanup_internal;
+	funcs.ipa_uc_offload_conn_pipes = ipa_uc_offload_conn_pipes_internal;
+	funcs.ipa_uc_offload_disconn_pipes =
+		ipa_uc_offload_disconn_pipes_internal;
+	funcs.ipa_set_perf_profile = ipa_set_perf_profile_internal;
+	funcs.ipa_uc_offload_reg_rdyCB = ipa_uc_offload_reg_rdyCB_internal;
+	funcs.ipa_uc_offload_dereg_rdyCB = ipa_uc_offload_dereg_rdyCB_internal;
+
+	if (ipa_fmwk_register_uc_offload(&funcs))
+		pr_err("failed to register uc_offload APIs\n");
+}

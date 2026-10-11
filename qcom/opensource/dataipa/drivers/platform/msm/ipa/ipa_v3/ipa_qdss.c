@@ -3,8 +3,10 @@
  * Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
  */
 
+#include <linux/ipa_qdss.h>
 #include <linux/msm_ipa.h>
 #include <linux/string.h>
+#include <linux/ipa_qdss.h>
 #include "ipa_i.h"
 
 #define IPA_HOLB_TMR_VALUE 0
@@ -56,7 +58,7 @@ static void ipa3_qdss_gsi_chan_err_cb(struct gsi_chan_err_notify *notify)
 	ipa_assert();
 }
 
-int ipa_qdss_conn_pipes(struct ipa_qdss_conn_in_params *in,
+int ipa3_conn_qdss_pipes(struct ipa_qdss_conn_in_params *in,
 	struct ipa_qdss_conn_out_params *out)
 {
 	struct gsi_chan_props gsi_channel_props;
@@ -74,13 +76,13 @@ int ipa_qdss_conn_pipes(struct ipa_qdss_conn_in_params *in,
 		return -IPA_QDSS_PIPE_CONN_FAILURE;
 	}
 
-	ipa_ep_idx_tx = ipa_get_ep_mapping(IPA_CLIENT_MHI_QDSS_CONS);
+	ipa_ep_idx_tx = ipa3_get_ep_mapping(IPA_CLIENT_MHI_QDSS_CONS);
 	if ((ipa_ep_idx_tx) < 0 || (!ipa3_ctx->ipa_config_is_mhi)) {
 		IPA_QDSS_ERR("getting EP map failed\n");
 		return -IPA_QDSS_PIPE_CONN_FAILURE;
 	}
 
-	ipa_ep_idx_rx = ipa_get_ep_mapping(IPA_CLIENT_QDSS_PROD);
+	ipa_ep_idx_rx = ipa3_get_ep_mapping(IPA_CLIENT_QDSS_PROD);
 	if ((ipa_ep_idx_rx == -1) ||
 		(ipa_ep_idx_rx >= IPA3_MAX_NUM_PIPES)) {
 		IPA_QDSS_ERR("out of range ipa_ep_idx_rx = %d\n",
@@ -111,7 +113,7 @@ int ipa_qdss_conn_pipes(struct ipa_qdss_conn_in_params *in,
 	gsi_channel_props.prot = GSI_CHAN_PROT_QDSS;
 	gsi_channel_props.dir = GSI_CHAN_DIR_TO_GSI;
 
-	gsi_ep_info = ipa_get_gsi_ep_info(ep_rx->client);
+	gsi_ep_info = ipa3_get_gsi_ep_info(ep_rx->client);
 	if (!gsi_ep_info) {
 		IPA_QDSS_ERR("Failed getting GSI EP info for client=%d\n",
 			ep_rx->client);
@@ -177,7 +179,7 @@ int ipa_qdss_conn_pipes(struct ipa_qdss_conn_in_params *in,
 	ep_cfg.mode.mode = IPA_DMA;
 	ep_cfg.mode.dst = IPA_CLIENT_MHI_QDSS_CONS;
 	ep_cfg.seq.set_dynamic = true;
-	if (ipa3_cfg_ep(ipa_get_ep_mapping(IPA_CLIENT_QDSS_PROD),
+	if (ipa3_cfg_ep(ipa3_get_ep_mapping(IPA_CLIENT_QDSS_PROD),
 		&ep_cfg)) {
 		IPA_QDSS_ERR("Setting DMA mode failed\n");
 		goto fail_write_scratch;
@@ -201,9 +203,8 @@ fail:
 	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 	return -IPA_QDSS_PIPE_CONN_FAILURE;
 }
-EXPORT_SYMBOL(ipa_qdss_conn_pipes);
 
-int ipa_qdss_disconn_pipes(void)
+int ipa3_disconn_qdss_pipes(void)
 {
 	int result = 0;
 	int ipa_ep_idx_rx;
@@ -222,7 +223,7 @@ int ipa_qdss_disconn_pipes(void)
 	}
 
 	/* Stop QDSS_rx gsi channel / release channel */
-	result = ipa_stop_gsi_channel(ipa_ep_idx_rx);
+	result = ipa3_stop_gsi_channel(ipa_ep_idx_rx);
 	if (result) {
 		IPA_QDSS_ERR("Failed stopping QDSS gsi channel\n");
 		goto fail;
@@ -241,7 +242,7 @@ int ipa_qdss_disconn_pipes(void)
 	ep_cfg.mode.mode = IPA_BASIC;
 	ep_cfg.mode.dst = IPA_CLIENT_MHI_QDSS_CONS;
 	ep_cfg.seq.set_dynamic = true;
-	if (ipa3_cfg_ep(ipa_get_ep_mapping(IPA_CLIENT_QDSS_PROD),
+	if (ipa3_cfg_ep(ipa3_get_ep_mapping(IPA_CLIENT_QDSS_PROD),
 		&ep_cfg)) {
 		IPAERR("Resetting DMA mode failed\n");
 	}
@@ -259,4 +260,15 @@ fail:
 	IPA_ACTIVE_CLIENTS_DEC_SIMPLE();
 	return -IPA_QDSS_PIPE_DISCONN_FAILURE;
 }
-EXPORT_SYMBOL(ipa_qdss_disconn_pipes);
+
+void ipa3_qdss_register(void)
+{
+	struct ipa_qdss_data funcs;
+
+	funcs.ipa_qdss_conn_pipes = ipa3_conn_qdss_pipes;
+	funcs.ipa_qdss_disconn_pipes = ipa3_disconn_qdss_pipes;
+
+	if(ipa_fmwk_register_ipa_qdss(&funcs))
+		pr_err("failed to register ipa_qdss APIs\n");
+}
+EXPORT_SYMBOL(ipa3_qdss_register);

@@ -50,8 +50,6 @@ LOCAL_SRC_FILES   := $(wildcard $(LOCAL_PATH)/**/*) $(wildcard $(LOCAL_PATH)/*)
 LOCAL_MODULE              := ipam.ko
 LOCAL_MODULE_KBUILD_NAME  := ipa/ipam.ko
 LOCAL_MODULE_DEBUG_ENABLE := true
-LOCAL_EXPORT_KO_INCLUDE_DIRS    := $(LOCAL_PATH)/include
-LOCAL_EXPORT_KO_INCLUDE_DIRS    += $(LOCAL_PATH)/include/uapi
 LOCAL_MODULE_PATH := $(KERNEL_MODULES_OUT)
 LOCAL_REQUIRED_MODULES := $(DATAIPA_REQUIRED_MODULES)
 LOCAL_ADDITIONAL_DEPENDENCIES := $(DATAIPA_ADDITIONAL_DEPENDENCIES)
@@ -71,6 +69,26 @@ $(warning $(DLKM_DIR))
 include $(DLKM_DIR)/Build_external_kernelmodule.mk
 
 ifeq ($(CONFIG_LOCALVERSION), "-gki-consolidate")
+include $(CLEAR_VARS)
+KBUILD_OPTIONS += MODNAME=rndisipam
+LOCAL_SRC_FILES   := $(wildcard $(LOCAL_PATH)/**/*) $(wildcard $(LOCAL_PATH)/*)
+LOCAL_MODULE              := rndisipam.ko
+LOCAL_MODULE_KBUILD_NAME  := ipa/ipa_clients/rndisipam.ko
+LOCAL_MODULE_DEBUG_ENABLE := true
+LOCAL_MODULE_PATH := $(KERNEL_MODULES_OUT)
+$(warning $(DLKM_DIR))
+include $(DLKM_DIR)/Build_external_kernelmodule.mk
+
+include $(CLEAR_VARS)
+KBUILD_OPTIONS += MODNAME=ipaclientsm
+LOCAL_SRC_FILES   := $(wildcard $(LOCAL_PATH)/**/*) $(wildcard $(LOCAL_PATH)/*)
+LOCAL_MODULE              := ipa_clientsm.ko
+LOCAL_MODULE_KBUILD_NAME  := ipa/ipa_clients/ipa_clientsm.ko
+LOCAL_MODULE_DEBUG_ENABLE := true
+LOCAL_MODULE_PATH := $(KERNEL_MODULES_OUT)
+$(warning $(DLKM_DIR))
+include $(DLKM_DIR)/Build_external_kernelmodule.mk
+
 include $(CLEAR_VARS)
 KBUILD_OPTIONS += MODNAME=ipatestm
 LOCAL_SRC_FILES   := $(wildcard $(LOCAL_PATH)/**/*) $(wildcard $(LOCAL_PATH)/*)

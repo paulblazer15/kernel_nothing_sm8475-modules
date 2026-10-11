@@ -238,7 +238,7 @@ static int ipa_get_generic_stats(unsigned long arg)
 		/* HOLB Discard stats */
 		holb_disc_stats_ptr = &generic_stats->holb_stats.holb_disc_stats[0];
 		for (i = 0; i < IPA_CLIENT_MAX; i++) {
-			int ep_idx = ipa_get_ep_mapping(i);
+			int ep_idx = ipa3_get_ep_mapping(i);
 
 			if ((ep_idx == -1) || (!IPA_CLIENT_IS_CONS(i)) ||
 				(IPA_CLIENT_IS_TEST(i)))
@@ -384,7 +384,7 @@ static void ipa_get_gsi_pipe_info(
 	pipe_info_ptr_local->gsi_chan_ring_wp =
 		gsi_read_chan_ring_wp(ep->gsi_chan_hdl, gsi_get_peripheral_ee());
 
-	gsi_ep_info = ipa_get_gsi_ep_info(ep->client);
+	gsi_ep_info = ipa3_get_gsi_ep_info(ep->client);
 	pipe_info_ptr_local->gsi_ipa_if_tlv =
 		gsi_ep_info ? gsi_ep_info->ipa_if_tlv : 0;
 	pipe_info_ptr_local->gsi_ipa_if_aos =
@@ -759,7 +759,7 @@ static int ipa_get_wlan_inst_stats(unsigned long arg)
 				uint64_t)pipe_info_ptr +
 				(j * sizeof(struct ipa_lnx_pipe_info)));
 
-			ep_idx = ipa_get_ep_mapping(
+			ep_idx = ipa3_get_ep_mapping(
 				ipa_lnx_agent_ctx.alloc_info.wlan_inst_info[
 				i].pipes_client_type[j]);
 			if (ep_idx == -1) {
@@ -1069,7 +1069,7 @@ static int ipa_get_eth_inst_stats(unsigned long arg)
 				uint64_t)pipe_info_ptr + (j *
 				sizeof(struct ipa_lnx_pipe_info)));
 
-			ep_idx = ipa_get_ep_mapping(
+			ep_idx = ipa3_get_ep_mapping(
 				ipa_lnx_agent_ctx.alloc_info.eth_inst_info[
 					i].pipes_client_type[j]);
 			if (ep_idx == -1) {
@@ -1250,7 +1250,7 @@ static int ipa_get_usb_inst_stats(unsigned long arg)
 				uint64_t)pipe_info_ptr + (j *
 				sizeof(struct ipa_lnx_pipe_info)));
 
-			ep_idx = ipa_get_ep_mapping(
+			ep_idx = ipa3_get_ep_mapping(
 				ipa_lnx_agent_ctx.alloc_info.usb_inst_info[
 					i].pipes_client_type[j]);
 			if (ep_idx == -1) {
@@ -1432,7 +1432,7 @@ static int ipa_get_mhip_inst_stats(unsigned long arg)
 			pipe_info_ptr_local = (struct ipa_lnx_pipe_info *)((uint64_t)
 				pipe_info_ptr + (j * sizeof(struct ipa_lnx_pipe_info)));
 
-			ep_idx = ipa_get_ep_mapping(
+			ep_idx = ipa3_get_ep_mapping(
 				ipa_lnx_agent_ctx.alloc_info.mhip_inst_info[
 					i].pipes_client_type[j]);
 			if (ep_idx == -1) {
@@ -1519,7 +1519,7 @@ static int ipa_stats_get_alloc_info(unsigned long arg)
 	if (ipa_lnx_agent_ctx.log_type_mask &
 		TLPD_IPA_LOG_TYPE_GENERIC_STATS) {
 		for (i = 0; i < IPA_CLIENT_MAX; i++) {
-			int ep_idx = ipa_get_ep_mapping(i);
+			int ep_idx = ipa3_get_ep_mapping(i);
 
 			if ((ep_idx == -1) || (!IPA_CLIENT_IS_CONS(i)) ||
 				(IPA_CLIENT_IS_TEST(i)))
@@ -1546,8 +1546,8 @@ static int ipa_stats_get_alloc_info(unsigned long arg)
 
 	/* For WLAN instance */
 	if (ipa_lnx_agent_ctx.log_type_mask & TLPD_IPA_LOG_TYPE_WLAN_STATS) {
-		ipa_ep_idx_tx = ipa_get_ep_mapping(IPA_CLIENT_WLAN2_CONS);
-		ipa_ep_idx_rx = ipa_get_ep_mapping(IPA_CLIENT_WLAN2_PROD);
+		ipa_ep_idx_tx = ipa3_get_ep_mapping(IPA_CLIENT_WLAN2_CONS);
+		ipa_ep_idx_rx = ipa3_get_ep_mapping(IPA_CLIENT_WLAN2_PROD);
 		if ((ipa_ep_idx_tx == -1) || (ipa_ep_idx_rx == -1) ||
 			!ipa3_ctx->ep[ipa_ep_idx_tx].valid ||
 			!ipa3_ctx->ep[ipa_ep_idx_rx].valid) {
