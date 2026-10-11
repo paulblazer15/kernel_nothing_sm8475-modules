@@ -725,8 +725,8 @@ cancel_work_sync(&DATARMNETecc0627c70.DATARMNET132b9c7dc4[i].DATARMNET33110a3ff5
 ;}int DATARMNET82e88dbb56(struct sk_buff_head*list,int cpu){struct sk_buff*skb;
 struct softnet_data*DATARMNETe95ad852b4=&per_cpu(softnet_data,cpu);rtnl_lock();
 while((skb=skb_dequeue_tail(list))!=NULL){if(rmnet_is_real_dev_registered(skb->
-dev)){DATARMNET68d84e7b98[DATARMNETf8de7cb644]++;dev_core_stats_rx_dropped_inc(
-skb->dev);
+dev)){DATARMNET68d84e7b98[DATARMNETf8de7cb644]++;atomic_long_inc(&skb->dev->
+rx_dropped);
 #if (KERNEL_VERSION((0xd03+244-0xdf1), 9, (0xd2d+202-0xdf7)) <= \
 LINUX_VERSION_CODE)
 rps_input_queue_head_incr(DATARMNETe95ad852b4);atomic_inc(&DATARMNETe95ad852b4->
